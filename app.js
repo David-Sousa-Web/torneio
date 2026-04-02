@@ -1,5 +1,6 @@
+﻿
 /* ============================================
-   CHIMPAS LEAGUE — Tournament Logic
+   CHIMPAS LEAGUE - Tournament Logic (Groups + KO)
    ============================================ */
 
 const PLAYERS = [
@@ -8,63 +9,146 @@ const PLAYERS = [
 ];
 
 const CL_TEAMS = [
-  { name: 'Real Madrid',        short: 'R. Madrid',  logo: 'https://upload.wikimedia.org/wikipedia/en/5/56/Real_Madrid_CF.svg',                                               color: '#FEBE10', initials: 'RM' },
-  { name: 'Manchester City',    short: 'Man City',   logo: 'https://upload.wikimedia.org/wikipedia/en/e/eb/Manchester_City_FC_badge.svg',                                      color: '#6CABDD', initials: 'MC' },
-  { name: 'Bayern Munich',      short: 'Bayern',     logo: 'https://upload.wikimedia.org/wikipedia/commons/1/1b/FC_Bayern_M%C3%BCnchen_logo_%282017%29.svg',                  color: '#DC052D', initials: 'BM' },
-  { name: 'Liverpool',          short: 'Liverpool',  logo: 'https://upload.wikimedia.org/wikipedia/en/0/0c/Liverpool_FC.svg',                                                  color: '#C8102E', initials: 'LV' },
-  { name: 'Arsenal',            short: 'Arsenal',    logo: 'https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg',                                                    color: '#EF0107', initials: 'AR' },
-  { name: 'PSG',                short: 'PSG',        logo: 'https://upload.wikimedia.org/wikipedia/en/a/a7/Paris_Saint-Germain_F.C..svg',                                     color: '#004170', initials: 'PS' },
-  { name: 'Inter Milan',        short: 'Inter',      logo: 'https://upload.wikimedia.org/wikipedia/commons/0/05/FC_Internazionale_Milano_2021.svg',                            color: '#0068A8', initials: 'IM' },
-  { name: 'Barcelona',          short: 'Barça',      logo: 'https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg',                                     color: '#A50044', initials: 'FC' },
-  { name: 'Atlético Madrid',    short: 'Atlético',   logo: 'https://media.api-sports.io/football/teams/530.png',                                                                    color: '#CB3524', initials: 'AT' },
-  { name: 'Borussia Dortmund',  short: 'Dortmund',   logo: 'https://upload.wikimedia.org/wikipedia/commons/6/67/Borussia_Dortmund_logo.svg',                                  color: '#FDE100', initials: 'BD' }
+  { name: 'Real Madrid',       short: 'R. Madrid', logo: 'https://upload.wikimedia.org/wikipedia/en/5/56/Real_Madrid_CF.svg',                                              color: '#FEBE10', initials: 'RM' },
+  { name: 'Manchester City',   short: 'Man City',  logo: 'https://upload.wikimedia.org/wikipedia/en/e/eb/Manchester_City_FC_badge.svg',                                     color: '#6CABDD', initials: 'MC' },
+  { name: 'Bayern Munich',     short: 'Bayern',    logo: 'https://upload.wikimedia.org/wikipedia/commons/1/1b/FC_Bayern_M%C3%BCnchen_logo_%282017%29.svg',                 color: '#DC052D', initials: 'BM' },
+  { name: 'Liverpool',         short: 'Liverpool', logo: 'https://upload.wikimedia.org/wikipedia/en/0/0c/Liverpool_FC.svg',                                                 color: '#C8102E', initials: 'LV' },
+  { name: 'Arsenal',           short: 'Arsenal',   logo: 'https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg',                                                   color: '#EF0107', initials: 'AR' },
+  { name: 'PSG',               short: 'PSG',       logo: 'https://upload.wikimedia.org/wikipedia/en/a/a7/Paris_Saint-Germain_F.C..svg',                                    color: '#004170', initials: 'PS' },
+  { name: 'Inter Milan',       short: 'Inter',     logo: 'https://upload.wikimedia.org/wikipedia/commons/0/05/FC_Internazionale_Milano_2021.svg',                           color: '#0068A8', initials: 'IM' },
+  { name: 'Barcelona',         short: 'Barca',     logo: 'https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg',                                    color: '#A50044', initials: 'FC' },
+  { name: 'Atletico Madrid',   short: 'Atletico',  logo: 'https://media.api-sports.io/football/teams/530.png',                                                              color: '#CB3524', initials: 'AT' },
+  { name: 'Borussia Dortmund', short: 'Dortmund',  logo: 'https://upload.wikimedia.org/wikipedia/commons/6/67/Borussia_Dortmund_logo.svg',                                 color: '#FDE100', initials: 'BD' }
 ];
 
-// ---- State ----
+const STORAGE_KEY = 'chimpas_v4';
+const GROUP_IDS = ['A', 'B'];
+const GROUP_DRAW_TOTAL_SLOTS = 10;
+const GROUP_DRAW_SLOTS_PER_GROUP = 5;
+const GROUP_DRAW_ROLL_MS = 1800;
+const GROUP_DRAW_LOCK_PAUSE_MS = 900;
+const GROUP_DRAW_INITIAL_DELAY_MS = 500;
+const GROUP_DRAW_CAROUSEL_VISIBLE = 7;
+
 let S = {};
+let groupDrawStepTimer = null;
+let groupDrawRollTimer = null;
+let groupDrawTransitionCleanup = null;
 
 // ============================================
 // INIT
 // ============================================
 window.addEventListener('DOMContentLoaded', () => {
-  // Set background images
   const bgImg = "url('background.jpg')";
   document.querySelectorAll('.bg-image').forEach(el => {
     el.style.backgroundImage = bgImg;
   });
 
-  const saved = localStorage.getItem('chimpas_v3');
+  const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
-      S = JSON.parse(saved);
-      restoreScreen();
-      return;
-    } catch (e) { /* fall through */ }
+      const parsed = JSON.parse(saved);
+      if (isValidState(parsed)) {
+        S = parsed;
+        restoreScreen();
+        return;
+      }
+    } catch (e) {
+      // Ignore broken state.
+    }
   }
-  S = { screen: 'splash', playerTeams: null, matches: null };
+
+  S = createInitialState();
   showScreen('splash');
 });
 
+function createInitialState() {
+  return {
+    screen: 'splash',
+    playerTeams: null,
+    groups: null,
+    groupDraw: null,
+    matches: {},
+    knockout: {
+      ready: false,
+      seeds: null
+    },
+    nextTieStage: 1,
+    nextTieMatch: 1
+  };
+}
+
+function isValidState(candidate) {
+  return !!candidate && typeof candidate === 'object' && 'screen' in candidate;
+}
+
 function save() {
-  localStorage.setItem('chimpas_v3', JSON.stringify(S));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
 }
 
 function restoreScreen() {
   const s = S.screen;
-  if (s === 'draw')         { showScreen('draw');         renderDrawComplete(); }
-  else if (s === 'bracket-draw')  { showScreen('bracket-draw');  renderBracketDrawComplete(); }
-  else if (s === 'tournament')    { showScreen('tournament');    renderTournament(); }
-  else if (s === 'champion')      { showScreen('champion');      renderChampion(); }
-  else                            { showScreen('splash'); }
+  if (s === 'draw') {
+    showScreen('draw');
+    renderDrawComplete();
+  } else if (s === 'bracket-draw') {
+    showScreen('bracket-draw');
+    renderBracketDrawComplete();
+  } else if (s === 'groups' || s === 'qualifiers' || s === 'tournament') {
+    restoreTournamentFlow();
+  } else if (s === 'champion') {
+    showScreen('champion');
+    renderChampion();
+  } else {
+    showScreen('splash');
+  }
+}
+
+function restoreTournamentFlow() {
+  if (!S.groups) {
+    showScreen('splash');
+    return;
+  }
+
+  syncTournamentState(true);
+  save();
+
+  const target = S.knockout.ready ? 'qualifiers' : 'groups';
+
+  if (target === 'groups') {
+    showScreen('groups');
+    renderGroupsScreen();
+  } else {
+    showScreen('qualifiers');
+    renderQualifiersScreen();
+  }
 }
 
 function showScreen(name) {
+  if (name !== 'bracket-draw') clearGroupDrawTimers();
   document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
   const el = document.getElementById('screen-' + name);
   if (el) {
     el.classList.add('active');
     S.screen = name;
     save();
+  }
+}
+
+function clearGroupDrawTimers() {
+  if (groupDrawStepTimer) {
+    clearTimeout(groupDrawStepTimer);
+    groupDrawStepTimer = null;
+  }
+
+  if (groupDrawRollTimer) {
+    clearTimeout(groupDrawRollTimer);
+    groupDrawRollTimer = null;
+  }
+
+  if (groupDrawTransitionCleanup) {
+    groupDrawTransitionCleanup();
+    groupDrawTransitionCleanup = null;
   }
 }
 
@@ -77,19 +161,13 @@ function shuffleArray(arr) {
   return a;
 }
 
-// ============================================
-// SPLASH → DRAW TEAMS
-// ============================================
-function startDraw() {
-  const teamOrder = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  S.playerTeams = teamOrder; // S.playerTeams[playerIdx] = teamIdx
-  save();
-  showScreen('draw');
-  renderDrawAnimated();
+function playerName(playerIdx) {
+  return PLAYERS[playerIdx];
 }
 
-// ---- Helpers ----
-function teamOf(playerIdx) { return CL_TEAMS[S.playerTeams[playerIdx]]; }
+function teamOf(playerIdx) {
+  return CL_TEAMS[S.playerTeams[playerIdx]];
+}
 
 function logoImg(team, cssClass) {
   return `<img src="${team.logo}" alt="${team.name}" class="${cssClass}"
@@ -97,7 +175,25 @@ function logoImg(team, cssClass) {
     <div class="card-logo-fallback" style="display:none;background:${team.color};color:#000">${team.initials}</div>`;
 }
 
-// ---- Draw animated ----
+function participantsKey(participants) {
+  return [...participants].sort((a, b) => a - b).join('-');
+}
+
+function unique(arr) {
+  return [...new Set(arr)];
+}
+
+// ============================================
+// SPLASH -> DRAW TEAMS
+// ============================================
+function startDraw() {
+  const teamOrder = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  S.playerTeams = teamOrder;
+  save();
+  showScreen('draw');
+  renderDrawAnimated();
+}
+
 function renderDrawAnimated() {
   const grid = document.getElementById('draw-cards');
   grid.innerHTML = '';
@@ -150,120 +246,680 @@ function buildDrawCard(playerIdx, faceUp) {
 }
 
 // ============================================
-// BRACKET DRAW
+// GROUP DRAW
 // ============================================
 function startBracketDraw() {
+  clearGroupDrawTimers();
+
   const order = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  /*
-    order[0],order[1]  → P1 (A vs B)
-    order[2],order[3]  → P2 (A vs B)
-    order[4]           → Q1 seed (playerB — waits for P1 winner)
-    order[5]           → Q2 seed (playerB — waits for P2 winner)
-    order[6],order[7]  → Q3
-    order[8],order[9]  → Q4
-  */
-  const leg = () => ({ a: null, b: null });
-  S.matches = {
-    P1: { id:'P1', label:'Preliminar 1', round:'preliminary', playerA: order[0], playerB: order[1], leg1: leg(), leg2: leg(), winner: null },
-    P2: { id:'P2', label:'Preliminar 2', round:'preliminary', playerA: order[2], playerB: order[3], leg1: leg(), leg2: leg(), winner: null },
-    Q1: { id:'Q1', label:'Quartas 1',    round:'quarters',   playerA: null, playerB: order[4], feederA:'P1', leg1: leg(), leg2: leg(), winner: null },
-    Q2: { id:'Q2', label:'Quartas 2',    round:'quarters',   playerA: null, playerB: order[5], feederA:'P2', leg1: leg(), leg2: leg(), winner: null },
-    Q3: { id:'Q3', label:'Quartas 3',    round:'quarters',   playerA: order[6], playerB: order[7], leg1: leg(), leg2: leg(), winner: null },
-    Q4: { id:'Q4', label:'Quartas 4',    round:'quarters',   playerA: order[8], playerB: order[9], leg1: leg(), leg2: leg(), winner: null },
-    S1: { id:'S1', label:'Semi 1',       round:'semis',      playerA: null, playerB: null, feederA:'Q1', feederB:'Q2', leg1: leg(), leg2: leg(), winner: null },
-    S2: { id:'S2', label:'Semi 2',       round:'semis',      playerA: null, playerB: null, feederA:'Q3', feederB:'Q4', leg1: leg(), leg2: leg(), winner: null },
-    F1: { id:'F1', label:'Final',        round:'final',      playerA: null, playerB: null, feederA:'S1', feederB:'S2', leg1: leg(), leg2: leg(), winner: null },
+  S.groupDraw = {
+    order,
+    step: 0,
+    isAnimating: true,
+    currentTarget: null,
+    rollingPreview: null,
+    slots: {
+      A: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null),
+      B: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null)
+    }
   };
+
+  S.groups = {
+    A: { id: 'A', players: [], regularMatchIds: [], tieStages: [] },
+    B: { id: 'B', players: [], regularMatchIds: [], tieStages: [] }
+  };
+
+  S.matches = {};
+  S.knockout = { ready: false, seeds: null };
+  S.nextTieStage = 1;
+  S.nextTieMatch = 1;
+
   save();
   showScreen('bracket-draw');
   animateBracketDraw();
 }
 
-function animateBracketDraw() {
-  const content = document.getElementById('bracket-draw-content');
-  content.innerHTML = `
-    <div class="bd-section">
-      <div class="bd-phase-title">FASE PRELIMINAR</div>
-      <div class="bd-matches" id="bd-prelim"></div>
-    </div>
-    <div class="bd-section">
-      <div class="bd-phase-title">QUARTAS DE FINAL</div>
-      <div class="bd-matches" id="bd-qf"></div>
-    </div>`;
-  document.getElementById('bracket-draw-btn-row').classList.add('hidden');
+function hasCompletedGroupDraw() {
+  return !!(
+    S.groups &&
+    S.groups.A &&
+    S.groups.B &&
+    Array.isArray(S.groups.A.players) &&
+    Array.isArray(S.groups.B.players) &&
+    S.groups.A.players.length === GROUP_DRAW_SLOTS_PER_GROUP &&
+    S.groups.B.players.length === GROUP_DRAW_SLOTS_PER_GROUP
+  );
+}
 
-  const sequence = [
-    () => appendBDMatch('bd-prelim', 'P1'),
-    () => appendBDMatch('bd-prelim', 'P2'),
-    () => appendBDMatch('bd-qf', 'Q1'),
-    () => appendBDMatch('bd-qf', 'Q2'),
-    () => appendBDMatch('bd-qf', 'Q3'),
-    () => appendBDMatch('bd-qf', 'Q4'),
-  ];
-  sequence.forEach((fn, i) => setTimeout(fn, i * 750 + 400));
-  setTimeout(() => document.getElementById('bracket-draw-btn-row').classList.remove('hidden'), sequence.length * 750 + 600);
+function getGroupDrawTarget(step) {
+  return {
+    groupId: step % 2 === 0 ? 'A' : 'B',
+    slotIndex: Math.floor(step / 2)
+  };
+}
+
+function createEmptyGroupSlots() {
+  return {
+    A: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null),
+    B: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null)
+  };
+}
+
+function fillSlotsFromOrder(order) {
+  const slots = createEmptyGroupSlots();
+  order.forEach((playerIdx, step) => {
+    const target = getGroupDrawTarget(step);
+    slots[target.groupId][target.slotIndex] = playerIdx;
+  });
+  return slots;
+}
+
+function finalizeGroupDrawState() {
+  if (!S.groupDraw) return;
+  clearGroupDrawTimers();
+
+  const order = S.groupDraw.order || [];
+  const slots = fillSlotsFromOrder(order);
+
+  S.groupDraw.slots = slots;
+  S.groupDraw.step = order.length;
+  S.groupDraw.isAnimating = false;
+
+  S.groups = {
+    A: { id: 'A', players: slots.A.filter(v => v !== null), regularMatchIds: [], tieStages: [] },
+    B: { id: 'B', players: slots.B.filter(v => v !== null), regularMatchIds: [], tieStages: [] }
+  };
+
+  S.matches = {};
+  S.knockout = { ready: false, seeds: null };
+  S.nextTieStage = 1;
+  S.nextTieMatch = 1;
+
+  createGroupRoundRobin('A');
+  createGroupRoundRobin('B');
+  createKnockoutMatches();
+  save();
+}
+
+function buildGroupDrawTargetLabel(target, done = false) {
+  const slot = `${target.groupId}${target.slotIndex + 1}`;
+  return done ? `SORTEADO: ${slot}` : `SORTEANDO: ${slot}`;
+}
+
+function renderGroupDrawCarousel(target, pool, centerPoolIndex, winner = false) {
+  const labelEl = document.getElementById('gd-carousel-label');
+  const trackEl = document.getElementById('gd-carousel-track');
+  if (!labelEl || !trackEl) return;
+  if (!pool || pool.length === 0) return;
+
+  labelEl.textContent = buildGroupDrawTargetLabel(target, winner);
+
+  const cards = [];
+  const size = GROUP_DRAW_CAROUSEL_VISIBLE;
+  const half = Math.floor(size / 2);
+  const n = pool.length;
+
+  for (let i = -half; i <= half; i++) {
+    const idx = (centerPoolIndex + i + n * 3) % n;
+    const playerIdx = pool[idx];
+
+    cards.push(buildGroupDrawCarouselCard(playerIdx, {
+      isCenter: i === 0,
+      isWinner: winner && i === 0
+    }));
+  }
+
+  trackEl.className = `gd-carousel-track ${winner ? 'winner' : ''}`;
+  trackEl.style.transition = 'none';
+  trackEl.style.transform = 'translate3d(0px,0px,0px)';
+  trackEl.innerHTML = cards.join('');
+}
+
+function buildGroupDrawCarouselCard(playerIdx, opts = {}) {
+  const isCenter = !!opts.isCenter;
+  const isWinner = !!opts.isWinner;
+  const spinIndex = typeof opts.spinIndex === 'number' ? opts.spinIndex : null;
+  const spinAttr = spinIndex !== null ? ` data-spin-index="${spinIndex}"` : '';
+
+  if (playerIdx === null || playerIdx === undefined) {
+    return `<div class="gd-carousel-card${isCenter ? ' center' : ''}"${spinAttr}>
+      <div class="gd-carousel-player">Aguardando</div>
+    </div>`;
+  }
+
+  const team = teamOf(playerIdx);
+  return `<div class="gd-carousel-card${isCenter ? ' center' : ''}${isWinner ? ' winner' : ''}"${spinAttr}>
+    <img src="${team.logo}" class="gd-carousel-logo" alt="${team.name}" onerror="this.style.display='none'">
+    <div class="gd-carousel-player">${playerName(playerIdx)}</div>
+    <div class="gd-carousel-team">${team.short}</div>
+  </div>`;
+}
+
+function animateNextGroupDrawSlot() {
+  if (!S.groupDraw || !S.groupDraw.isAnimating) return;
+
+  if (S.groupDraw.step >= GROUP_DRAW_TOTAL_SLOTS) {
+    finalizeGroupDrawState();
+    renderBracketDrawComplete();
+    return;
+  }
+
+  const step = S.groupDraw.step;
+  const selectedPlayerIdx = S.groupDraw.order[step];
+  const target = getGroupDrawTarget(step);
+  const slotEl = document.getElementById(`gd-slot-${target.groupId}-${target.slotIndex}`);
+  const viewportEl = document.querySelector('.gd-carousel-viewport');
+  const trackEl = document.getElementById('gd-carousel-track');
+  if (!slotEl || !viewportEl || !trackEl) return;
+
+  const remaining = S.groupDraw.order.slice(step);
+  const spinPool = shuffleArray([...remaining]);
+  const poolSize = spinPool.length;
+  const selectedPoolIndex = spinPool.indexOf(selectedPlayerIdx);
+  const halfVisible = Math.floor(GROUP_DRAW_CAROUSEL_VISIBLE / 2);
+  const startPoolIndex = Math.max(halfVisible + 1, (poolSize * 2) + Math.floor(Math.random() * poolSize));
+  const loops = Math.max(4, Math.ceil(GROUP_DRAW_ROLL_MS / 450));
+  const offsetToWinner = (selectedPoolIndex - (startPoolIndex % poolSize) + poolSize) % poolSize;
+  const stopIndex = startPoolIndex + (poolSize * loops) + offsetToWinner;
+  const totalCards = stopIndex + GROUP_DRAW_CAROUSEL_VISIBLE + poolSize;
+
+  const cards = [];
+  for (let i = 0; i < totalCards; i++) {
+    cards.push(buildGroupDrawCarouselCard(spinPool[i % poolSize], { spinIndex: i }));
+  }
+
+  const rollingPreview = spinPool[startPoolIndex % poolSize];
+  S.groupDraw.currentTarget = target;
+  S.groupDraw.rollingPreview = rollingPreview;
+  const labelEl = document.getElementById('gd-carousel-label');
+  if (labelEl) labelEl.textContent = buildGroupDrawTargetLabel(target, false);
+
+  slotEl.className = 'gd-slot-row rolling';
+  slotEl.innerHTML = buildGroupDrawSlotInner(target.groupId, target.slotIndex, null, 'rolling');
+
+  trackEl.className = 'gd-carousel-track rolling';
+  trackEl.style.transition = 'none';
+  trackEl.innerHTML = cards.join('');
+
+  const viewportRect = viewportEl.getBoundingClientRect();
+  trackEl.style.transform = 'translate3d(0px,0px,0px)';
+  trackEl.getBoundingClientRect();
+
+  const sampleCardEl = trackEl.querySelector('.gd-carousel-card');
+  if (!sampleCardEl) return;
+  viewportEl.style.setProperty('--selector-w', `${sampleCardEl.offsetWidth}px`);
+  viewportEl.style.setProperty('--selector-h', `${sampleCardEl.offsetHeight}px`);
+  const sampleCardRect = sampleCardEl.getBoundingClientRect();
+  const selectorCenterY = (sampleCardRect.top - viewportRect.top) + (sampleCardRect.height / 2);
+  viewportEl.style.setProperty('--selector-center-y', `${selectorCenterY}px`);
+
+  const markerX = viewportRect.left + (viewportEl.offsetWidth / 2);
+
+  const offsetFor = (idx) => {
+    const cardEl = trackEl.querySelector(`[data-spin-index="${idx}"]`);
+    if (!cardEl) return 0;
+    const rect = cardEl.getBoundingClientRect();
+    return markerX - (rect.left + rect.width / 2);
+  };
+  const startX = offsetFor(startPoolIndex);
+  const endX = offsetFor(stopIndex);
+
+  trackEl.style.transform = `translate3d(${startX}px,0px,0px)`;
+  trackEl.getBoundingClientRect();
+
+  let spinFinished = false;
+  const finishSpin = () => {
+    if (spinFinished) return;
+    spinFinished = true;
+
+    if (groupDrawRollTimer) {
+      clearTimeout(groupDrawRollTimer);
+      groupDrawRollTimer = null;
+    }
+    if (groupDrawTransitionCleanup) {
+      groupDrawTransitionCleanup();
+      groupDrawTransitionCleanup = null;
+    }
+
+    trackEl.classList.remove('rolling');
+    trackEl.style.transition = 'none';
+    trackEl.style.transform = `translate3d(${endX}px,0px,0px)`;
+    trackEl.getBoundingClientRect();
+
+    trackEl.querySelectorAll('.gd-carousel-card.center, .gd-carousel-card.winner')
+      .forEach(el => el.classList.remove('center', 'winner'));
+    const winnerEl = trackEl.querySelector(`[data-spin-index="${stopIndex}"]`);
+    if (winnerEl) winnerEl.classList.add('center', 'winner');
+
+    S.groupDraw.slots[target.groupId][target.slotIndex] = selectedPlayerIdx;
+    S.groupDraw.step += 1;
+    S.groupDraw.currentTarget = target;
+    S.groupDraw.rollingPreview = selectedPlayerIdx;
+    save();
+
+    if (labelEl) labelEl.textContent = buildGroupDrawTargetLabel(target, true);
+
+    slotEl.className = 'gd-slot-row locked lock-flash';
+    slotEl.innerHTML = buildGroupDrawSlotInner(target.groupId, target.slotIndex, selectedPlayerIdx, 'locked');
+    setTimeout(() => slotEl.classList.remove('lock-flash'), 420);
+
+    if (S.groupDraw.step >= GROUP_DRAW_TOTAL_SLOTS) {
+      groupDrawStepTimer = setTimeout(() => {
+        finalizeGroupDrawState();
+        renderBracketDrawComplete();
+      }, GROUP_DRAW_LOCK_PAUSE_MS);
+    } else {
+      groupDrawStepTimer = setTimeout(animateNextGroupDrawSlot, GROUP_DRAW_LOCK_PAUSE_MS);
+    }
+  };
+
+  const onTransitionEnd = (ev) => {
+    if (ev.target !== trackEl || ev.propertyName !== 'transform') return;
+    finishSpin();
+  };
+  trackEl.addEventListener('transitionend', onTransitionEnd);
+  groupDrawTransitionCleanup = () => {
+    trackEl.removeEventListener('transitionend', onTransitionEnd);
+    trackEl.style.transition = 'none';
+  };
+
+  groupDrawRollTimer = setTimeout(finishSpin, GROUP_DRAW_ROLL_MS + 650);
+  trackEl.style.transition = `transform ${GROUP_DRAW_ROLL_MS}ms cubic-bezier(0.12, 0.78, 0.18, 1)`;
+  trackEl.style.transform = `translate3d(${endX}px,0px,0px)`;
+}
+
+function createGroupRoundRobin(groupId) {
+  const players = S.groups[groupId].players;
+  let seq = 1;
+
+  for (let i = 0; i < players.length; i++) {
+    for (let j = i + 1; j < players.length; j++) {
+      const matchId = `G-${groupId}-${seq++}`;
+      createMatch({
+        id: matchId,
+        label: `Grupo ${groupId} - Rodada ${seq - 1}`,
+        phase: 'groups',
+        kind: 'group-regular',
+        mode: 'league',
+        groupId,
+        playerA: players[i],
+        playerB: players[j]
+      });
+      S.groups[groupId].regularMatchIds.push(matchId);
+    }
+  }
+}
+
+function createKnockoutMatches() {
+  createMatch({ id: 'QF1', label: 'Quartas 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'QF2', label: 'Quartas 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'QF3', label: 'Quartas 3', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'QF4', label: 'Quartas 4', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'SF1', label: 'Semi 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'semis', playerA: null, playerB: null });
+  createMatch({ id: 'SF2', label: 'Semi 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'semis', playerA: null, playerB: null });
+  createMatch({ id: 'F1', label: 'Final', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'final', playerA: null, playerB: null });
+}
+
+function createMatch({ id, label, phase, kind, mode, round = null, groupId = null, playerA = null, playerB = null, tieStageId = null }) {
+  S.matches[id] = {
+    id,
+    label,
+    phase,
+    kind,
+    mode,
+    round,
+    groupId,
+    tieStageId,
+    playerA,
+    playerB,
+    score: { a: null, b: null },
+    winner: null,
+    decidedByPenalties: false
+  };
+}
+
+function animateBracketDraw() {
+  document.getElementById('bracket-draw-btn-row').classList.add('hidden');
+  renderGroupDrawSkeleton();
+
+  if (!S.groupDraw || !S.groupDraw.isAnimating) return;
+  groupDrawStepTimer = setTimeout(animateNextGroupDrawSlot, GROUP_DRAW_INITIAL_DELAY_MS);
 }
 
 function renderBracketDrawComplete() {
+  clearGroupDrawTimers();
+
+  if (S.groupDraw && S.groupDraw.isAnimating) {
+    finalizeGroupDrawState();
+  } else if (!hasCompletedGroupDraw() && S.groupDraw) {
+    finalizeGroupDrawState();
+  }
+
+  if (!hasCompletedGroupDraw()) return;
+
   const content = document.getElementById('bracket-draw-content');
-  content.innerHTML = `
-    <div class="bd-section">
-      <div class="bd-phase-title">FASE PRELIMINAR</div>
-      <div class="bd-matches" id="bd-prelim"></div>
-    </div>
-    <div class="bd-section">
-      <div class="bd-phase-title">QUARTAS DE FINAL</div>
-      <div class="bd-matches" id="bd-qf"></div>
-    </div>`;
-  ['P1','P2'].forEach(id => appendBDMatch('bd-prelim', id));
-  ['Q1','Q2','Q3','Q4'].forEach(id => appendBDMatch('bd-qf', id));
+  content.innerHTML = '';
+
+  const grid = document.createElement('div');
+  grid.className = 'gd-grid';
+  grid.appendChild(buildGroupDrawCard('A'));
+  grid.appendChild(buildGroupDrawCard('B'));
+
+  const map = document.createElement('div');
+  map.className = 'gd-map';
+  map.innerHTML = `
+    <div class="gd-map-title">CRUZAMENTO DAS QUARTAS</div>
+    <div class="gd-map-line">QF1: A1 x B4</div>
+    <div class="gd-map-line">QF2: B2 x A3</div>
+    <div class="gd-map-line">QF3: B1 x A4</div>
+    <div class="gd-map-line">QF4: A2 x B3</div>
+  `;
+
+  content.appendChild(grid);
+  content.appendChild(map);
   document.getElementById('bracket-draw-btn-row').classList.remove('hidden');
 }
 
-function appendBDMatch(containerId, matchId) {
-  const match = S.matches[matchId];
-  const container = document.getElementById(containerId);
+function renderGroupDrawSkeleton() {
+  if (!S.groupDraw) return;
 
-  const playerSlot = (pIdx, feeder) => {
-    if (pIdx === null) {
-      return `<div class="bd-player tbd"><span class="tbd-text">Venc. ${feeder}</span></div>`;
-    }
-    const team = teamOf(pIdx);
-    return `<div class="bd-player">
-      <img src="${team.logo}" class="bd-logo" onerror="this.style.display='none'">
-      <div>
-        <div class="bd-player-name">${PLAYERS[pIdx]}</div>
-        <div class="bd-team-sm">${team.short}</div>
-      </div>
+  const content = document.getElementById('bracket-draw-content');
+  content.innerHTML = '';
+
+  const stageWrap = document.createElement('div');
+  stageWrap.className = 'gd-carousel-stage animate-pop';
+
+  const currentTarget = getGroupDrawTarget(S.groupDraw.step >= GROUP_DRAW_TOTAL_SLOTS ? GROUP_DRAW_TOTAL_SLOTS - 1 : S.groupDraw.step);
+  stageWrap.innerHTML = `
+    <div id="gd-carousel-label" class="gd-carousel-label">${buildGroupDrawTargetLabel(currentTarget, false)}</div>
+    <div class="gd-carousel-viewport">
+      <div id="gd-carousel-track" class="gd-carousel-track"></div>
+    </div>
+  `;
+
+  const grid = document.createElement('div');
+  grid.className = 'gd-grid';
+  grid.appendChild(buildGroupDrawAnimatedCard('A'));
+  grid.appendChild(buildGroupDrawAnimatedCard('B'));
+
+  const map = document.createElement('div');
+  map.className = 'gd-map animate-pop';
+  map.innerHTML = `
+    <div class="gd-map-title">CRUZAMENTO DAS QUARTAS</div>
+    <div class="gd-map-line">QF1: A1 x B4</div>
+    <div class="gd-map-line">QF2: B2 x A3</div>
+    <div class="gd-map-line">QF3: B1 x A4</div>
+    <div class="gd-map-line">QF4: A2 x B3</div>
+  `;
+
+  const drawLayout = document.createElement('div');
+  drawLayout.className = 'gd-draw-layout';
+  drawLayout.appendChild(stageWrap);
+  drawLayout.appendChild(grid);
+  content.appendChild(drawLayout);
+  content.appendChild(map);
+
+  setTimeout(() => {
+    document.querySelectorAll('.gd-group').forEach((el, idx) => {
+      setTimeout(() => el.classList.add('animate-pop'), idx * 180);
+    });
+  }, 140);
+
+  if (S.groupDraw && S.groupDraw.order && S.groupDraw.order.length) {
+    const pool = S.groupDraw.order.slice(S.groupDraw.step);
+    const fallback = pool[0] ?? S.groupDraw.order[Math.min(S.groupDraw.step, S.groupDraw.order.length - 1)];
+    const preview = S.groupDraw.rollingPreview ?? fallback;
+    const previewIndex = Math.max(0, pool.indexOf(preview));
+    renderGroupDrawCarousel(currentTarget, pool, previewIndex, false);
+  }
+}
+
+function buildGroupDrawAnimatedCard(groupId) {
+  const slots = (S.groupDraw && S.groupDraw.slots && S.groupDraw.slots[groupId]) || new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null);
+  const card = document.createElement('div');
+  card.className = 'gd-group';
+
+  let slotsHtml = '';
+  for (let i = 0; i < GROUP_DRAW_SLOTS_PER_GROUP; i++) {
+    const playerIdx = slots[i];
+    const mode = playerIdx === null ? 'empty' : 'locked';
+    slotsHtml += `<div id="gd-slot-${groupId}-${i}" class="gd-slot-row ${mode}">
+      ${buildGroupDrawSlotInner(groupId, i, playerIdx, mode)}
     </div>`;
-  };
+  }
 
-  const el = document.createElement('div');
-  el.className = 'bd-match-item animate-pop';
-  el.innerHTML = `
-    ${playerSlot(match.playerA, match.feederA)}
-    <span class="bd-vs">VS</span>
-    ${playerSlot(match.playerB, match.feederB)}`;
-  container.appendChild(el);
+  card.innerHTML = `
+    <div class="gd-group-title">GRUPO ${groupId}</div>
+    <div class="gd-slot-list">${slotsHtml}</div>
+  `;
+
+  return card;
+}
+
+function buildGroupDrawSlotInner(groupId, slotIndex, playerIdx, mode) {
+  const badge = `${groupId}${slotIndex + 1}`;
+
+  if (mode === 'locked' && playerIdx !== null) {
+    const team = teamOf(playerIdx);
+    return `
+      <span class="gd-slot-badge">${badge}</span>
+      <img src="${team.logo}" class="gd-player-logo" alt="${team.name}" onerror="this.style.display='none'">
+      <span class="gd-player-name">${playerName(playerIdx)}</span>
+      <span class="gd-player-team">${team.short}</span>
+    `;
+  }
+
+  if (mode === 'rolling') {
+    return `
+      <span class="gd-slot-badge">${badge}</span>
+      <span class="gd-slot-placeholder">Sorteando...</span>
+    `;
+  }
+
+  return `
+    <span class="gd-slot-badge">${badge}</span>
+    <span class="gd-slot-placeholder">Aguardando sorteio</span>
+  `;
+}
+
+function buildGroupDrawCard(groupId) {
+  const group = S.groups[groupId];
+  const card = document.createElement('div');
+  card.className = 'gd-group';
+
+  const playersHtml = group.players.map(playerIdx => {
+    const team = teamOf(playerIdx);
+    return `<div class="gd-player-row">
+      <img src="${team.logo}" class="gd-player-logo" alt="${team.name}" onerror="this.style.display='none'">
+      <span class="gd-player-name">${playerName(playerIdx)}</span>
+      <span class="gd-player-team">${team.short}</span>
+    </div>`;
+  }).join('');
+
+  card.innerHTML = `
+    <div class="gd-group-title">GRUPO ${groupId}</div>
+    <div class="gd-player-list">${playersHtml}</div>
+  `;
+
+  return card;
 }
 
 // ============================================
-// TOURNAMENT BRACKET
+// TOURNAMENT SCREEN
 // ============================================
 function startTournament() {
-  showScreen('tournament');
-  renderTournament();
+  if (!S.groups || !hasCompletedGroupDraw()) return;
+  if (S.groupDraw && S.groupDraw.isAnimating) return;
+  const state = prepareTournamentState();
+  if (!state) return;
+
+  if (S.knockout.ready) {
+    showScreen('qualifiers');
+    renderQualifiersScreen();
+  } else {
+    showScreen('groups');
+    renderGroupsScreen();
+  }
+}
+
+function openGroupsScreen() {
+  if (!S.groups) return;
+  showScreen('groups');
+  renderGroupsScreen();
+}
+
+function openQualifiersScreen() {
+  if (!S.groups) return;
+  showScreen('qualifiers');
+  renderQualifiersScreen();
 }
 
 function renderTournament() {
-  const container = document.getElementById('bracket-container');
+  const current = S.screen === 'qualifiers' ? 'qualifiers' : 'groups';
+  if (current === 'qualifiers') {
+    renderQualifiersScreen();
+  } else {
+    renderGroupsScreen();
+  }
+}
+
+function prepareTournamentState() {
+  if (!S.groups) return;
+
+  const state = syncTournamentState(true);
+  save();
+  return state;
+}
+
+function renderGroupsScreen() {
+  const state = prepareTournamentState();
+  if (!state) return;
+
+  const container = document.getElementById('groups-container');
+  if (!container) return;
   container.innerHTML = '';
 
+  const layout = document.createElement('div');
+  layout.className = 'groups-layout';
+
+  const groupsSection = document.createElement('section');
+  groupsSection.className = 'groups-section';
+  groupsSection.innerHTML = '<div class="section-title">FASE DE GRUPOS</div>';
+
+  const groupsGrid = document.createElement('div');
+  groupsGrid.className = 'group-stage-grid';
+  GROUP_IDS.forEach(groupId => {
+    groupsGrid.appendChild(buildGroupPanel(groupId, state[`group${groupId}`]));
+  });
+  groupsSection.appendChild(groupsGrid);
+  layout.appendChild(groupsSection);
+  container.appendChild(layout);
+}
+
+function renderQualifiersScreen() {
+  const state = prepareTournamentState();
+  if (!state) return;
+
+  const container = document.getElementById('qualifiers-container');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const layout = document.createElement('div');
+  layout.className = 'qualifiers-layout';
+
+  const koSection = document.createElement('section');
+  koSection.className = 'knockout-section';
+
+  const koHeader = document.createElement('div');
+  koHeader.className = 'section-title-row';
+  koHeader.innerHTML = `
+    <div class="section-title">QUALIFICATÓRIAS</div>
+    <div class="knockout-status ${S.knockout.ready ? 'ok' : 'wait'}">${S.knockout.ready ? 'Quartas liberadas' : 'Aguardando definicao dos grupos'}</div>
+  `;
+  koSection.appendChild(koHeader);
+
+  const board = document.createElement('div');
+  board.className = 'knockout-board';
+  renderKnockoutBoard(board);
+  koSection.appendChild(board);
+
+  layout.appendChild(koSection);
+  container.appendChild(layout);
+}
+
+function buildGroupPanel(groupId, groupResult) {
+  const group = S.groups[groupId];
+
+  const panel = document.createElement('div');
+  panel.className = 'group-panel';
+
+  const subtitle = groupResult.regularComplete
+    ? (groupResult.resolved ? 'Classificacao definida para as quartas.' : 'Desempates pendentes.')
+    : `Faltam ${groupResult.pendingRegularMatches} jogos da fase regular.`;
+
+  panel.innerHTML = `
+    <div class="group-panel-head">
+      <div class="group-panel-title">GRUPO ${groupId}</div>
+      <div class="group-panel-subtitle">${subtitle}</div>
+    </div>
+    ${buildStandingsTable(groupResult.rows)}
+    <div class="group-note ${groupResult.blockers.length ? 'warn' : ''}">${groupResult.blockers.length ? groupResult.blockers.join(' | ') : 'Sem pendencias de desempate.'}</div>
+    <div class="group-matches-title">Jogos do grupo</div>
+    <div class="group-match-list" id="group-matches-${groupId}"></div>
+  `;
+
+  const list = panel.querySelector(`#group-matches-${groupId}`);
+  group.regularMatchIds.forEach(matchId => list.appendChild(buildMatchCard(matchId)));
+
+  if (groupResult.tieMatchIds.length) {
+    const tieTitle = document.createElement('div');
+    tieTitle.className = 'group-matches-title extra';
+    tieTitle.textContent = 'Desempates';
+    list.appendChild(tieTitle);
+    groupResult.tieMatchIds.forEach(matchId => list.appendChild(buildMatchCard(matchId)));
+  }
+
+  return panel;
+}
+
+function buildStandingsTable(rows) {
+  const body = rows.map(row => {
+    const team = teamOf(row.player);
+    return `<tr>
+      <td>${row.pos}</td>
+      <td class="st-player">
+        <img src="${team.logo}" class="st-logo" alt="${team.name}" onerror="this.style.display='none'">
+        <span>${playerName(row.player)}</span>
+      </td>
+      <td>${row.played}</td>
+      <td>${row.points}</td>
+      <td>${row.gd}</td>
+      <td>${row.gf}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <table class="standings-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Jogador</th>
+          <th>J</th>
+          <th>P</th>
+          <th>SG</th>
+          <th>GM</th>
+        </tr>
+      </thead>
+      <tbody>${body}</tbody>
+    </table>
+  `;
+}
+
+function renderKnockoutBoard(board) {
   const rounds = [
-    { title: 'PRELIMINAR', ids: ['P1', 'P2'],             cls: 'col-prelim' },
-    { title: 'QUARTAS',    ids: ['Q1', 'Q2', 'Q3', 'Q4'], cls: 'col-qf'     },
-    { title: 'SEMIFINAIS', ids: ['S1', 'S2'],             cls: 'col-sf'     },
-    { title: 'FINAL',      ids: ['F1'],                   cls: 'col-final'  },
+    { title: 'QUARTAS', ids: ['QF1', 'QF2', 'QF3', 'QF4'], cls: 'col-qf' },
+    { title: 'SEMIFINAIS', ids: ['SF1', 'SF2'], cls: 'col-sf' },
+    { title: 'FINAL', ids: ['F1'], cls: 'col-final' }
   ];
 
   rounds.forEach(round => {
@@ -279,7 +935,7 @@ function renderTournament() {
     matchesDiv.className = 'bracket-matches';
     round.ids.forEach(id => matchesDiv.appendChild(buildMatchCard(id)));
     col.appendChild(matchesDiv);
-    container.appendChild(col);
+    board.appendChild(col);
   });
 }
 
@@ -288,62 +944,519 @@ function buildMatchCard(matchId) {
   const card = document.createElement('div');
   card.id = `mc-${matchId}`;
 
-  const isFinal = matchId === 'F1';
-  const aggA = isFinal ? (m.leg1.a ?? 0) : (m.leg1.a ?? 0) + (m.leg2.a ?? 0);
-  const aggB = isFinal ? (m.leg1.b ?? 0) : (m.leg1.b ?? 0) + (m.leg2.b ?? 0);
-  const hasAnyScore = m.leg1.a !== null;
-  const done = m.winner !== null;
-  const ready = m.playerA !== null && m.playerB !== null && !done;
-  const pending = m.playerA === null || m.playerB === null;
+  const scored = isMatchScored(m);
+  const complete = isMatchComplete(m);
+  const ready = m.playerA !== null && m.playerB !== null;
 
-  card.className = `match-card ${done ? 'match-done' : ready ? 'match-ready' : 'match-pending-players'}`;
+  card.className = `match-card ${complete ? 'match-done' : ready ? 'match-ready' : 'match-pending-players'}`;
 
-  const playerRow = (pIdx, feeder, side) => {
-    const isWinner = done && m.winner === pIdx;
-    const isLoser  = done && m.winner !== pIdx;
-    const isTbd    = pIdx === null;
+  const badgeText = m.kind === 'group-regular'
+    ? 'Grupo'
+    : m.kind === 'tie-duel'
+      ? 'Jogo extra'
+      : m.kind === 'tie-mini'
+        ? 'Mini-tabela'
+        : 'Mata-mata';
 
-    let logoHtml = '';
-    let nameHtml = '';
+  const unresolvedPenalty = m.mode === 'elimination' && scored && m.winner === null;
 
-    if (isTbd) {
-      logoHtml = `<div class="match-logo-placeholder">?</div>`;
-      nameHtml = feeder ? `Venc. ${feeder}` : 'A definir';
-    } else {
-      const team = teamOf(pIdx);
-      logoHtml = `<img src="${team.logo}" class="match-team-logo" alt="${team.name}"
-        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-        <div class="match-logo-placeholder" style="display:none">${team.initials}</div>`;
-      nameHtml = PLAYERS[pIdx];
+  const playerRow = (pIdx, side) => {
+    const scoreValue = scored ? (side === 'A' ? m.score.a : m.score.b) : '-';
+    if (pIdx === null) {
+      return `<div class="match-player tbd">
+        <div class="match-logo-placeholder">?</div>
+        <span class="match-player-name">A definir</span>
+        <span class="match-player-score">-</span>
+      </div>`;
     }
 
-    const aggVal = side === 'A' ? aggA : aggB;
-    const aggClass = isWinner ? 'agg-win' : '';
+    const team = teamOf(pIdx);
+    const isWinner = complete && m.winner === pIdx;
+    const isLoser = complete && m.winner !== null && m.winner !== pIdx;
 
-    return `<div class="match-player ${isWinner ? 'winner' : ''} ${isLoser ? 'loser' : ''} ${isTbd ? 'tbd' : ''}">
-      ${logoHtml}
-      <span class="match-player-name">${nameHtml}</span>
-      ${hasAnyScore && !isTbd ? `<span class="match-agg ${aggClass}">${aggVal}</span>` : ''}
+    return `<div class="match-player ${isWinner ? 'winner' : ''} ${isLoser ? 'loser' : ''}">
+      <img src="${team.logo}" class="match-team-logo" alt="${team.name}"
+        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <div class="match-logo-placeholder" style="display:none">${team.initials}</div>
+      <span class="match-player-name">${playerName(pIdx)}</span>
+      <span class="match-player-score">${scoreValue}</span>
     </div>`;
   };
 
-  const feederA = m.feederA || null;
-  const feederB = m.feederB || null;
+  const actionLabel = unresolvedPenalty
+    ? 'Definir penalti'
+    : (scored ? 'Editar placar' : 'Inserir placar');
+
+  const winnerLabel = m.mode === 'elimination' && complete
+    ? `<div class="match-winner-label">${playerName(m.winner)}${m.decidedByPenalties ? ' (pen.)' : ''}</div>`
+    : '';
+
+  const warningLabel = unresolvedPenalty
+    ? '<div class="match-warning">Empate - selecione vencedor nos penaltis</div>'
+    : '';
 
   card.innerHTML = `
-    ${playerRow(m.playerA, feederA, 'A')}
-    <div class="match-divider">
-      <span class="match-vs">${done ? '' : 'VS'}</span>
-      ${done ? '<span class="match-done-badge">✓</span>' : ''}
+    <div class="match-head">
+      <span class="match-type-badge">${badgeText}</span>
+      <span class="match-label">${m.label}</span>
     </div>
-    ${playerRow(m.playerB, feederB, 'B')}
-    ${ready ? `<button class="match-btn" onclick="openModal('${matchId}')">
-      ${hasAnyScore ? 'Editar Placar' : 'Inserir Placar'}
-    </button>` : ''}
-    ${done ? `<div class="match-winner-label">${PLAYERS[m.winner]}</div>` : ''}
+    ${playerRow(m.playerA, 'A')}
+    <div class="match-divider">
+      <span class="match-vs">VS</span>
+    </div>
+    ${playerRow(m.playerB, 'B')}
+    ${ready ? `<button class="match-btn" onclick="openModal('${matchId}')">${actionLabel}</button>` : ''}
+    ${warningLabel}
+    ${winnerLabel}
   `;
 
   return card;
+}
+
+// ============================================
+// GROUP RESOLUTION + TIEBREAKS
+// ============================================
+function syncTournamentState(allowCreateStages) {
+  const groupA = getGroupResolution('A', allowCreateStages);
+  const groupB = getGroupResolution('B', allowCreateStages);
+
+  syncKnockoutSeeds(groupA, groupB);
+  syncKnockoutProgress();
+
+  return { groupA, groupB };
+}
+
+function getGroupResolution(groupId, allowCreateStages) {
+  const group = S.groups[groupId];
+  const players = [...group.players];
+  const stats = computeStats(players, group.regularMatchIds);
+  const base = rankPlayersByRules(players, stats, group.regularMatchIds);
+
+  const regularComplete = group.regularMatchIds.every(id => isMatchScored(S.matches[id]));
+  const pendingRegularMatches = group.regularMatchIds.filter(id => !isMatchScored(S.matches[id])).length;
+
+  let order = [...base.order];
+  const blockers = [];
+
+  if (regularComplete) {
+    base.unresolvedSets.forEach(setPlayers => {
+      const stage = allowCreateStages ? ensureTieStage(groupId, 'regular', null, setPlayers) : findTieStage(groupId, 'regular', null, setPlayers);
+      if (!stage) {
+        blockers.push(`Desempate pendente no Grupo ${groupId}.`);
+        return;
+      }
+
+      const stageResult = evaluateTieStage(stage, allowCreateStages);
+      order = replacePlayers(order, setPlayers, stageResult.order);
+      if (!stageResult.resolved) blockers.push(...stageResult.blockers);
+    });
+  }
+
+  const rows = order.map((player, idx) => {
+    const p = stats[player];
+    return {
+      pos: idx + 1,
+      player,
+      played: p.played,
+      points: p.points,
+      gd: p.gd,
+      gf: p.gf
+    };
+  });
+
+  return {
+    groupId,
+    order,
+    rows,
+    regularComplete,
+    pendingRegularMatches,
+    tieMatchIds: collectTieMatchIds(group),
+    blockers: unique(blockers),
+    resolved: regularComplete && blockers.length === 0
+  };
+}
+
+function collectTieMatchIds(group) {
+  return unique(group.tieStages.flatMap(stage => stage.matchIds));
+}
+
+function computeStats(players, matchIds) {
+  const stats = {};
+  players.forEach(p => {
+    stats[p] = {
+      played: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      gf: 0,
+      ga: 0,
+      gd: 0,
+      points: 0
+    };
+  });
+
+  matchIds.forEach(matchId => {
+    const m = S.matches[matchId];
+    if (!m || !isMatchScored(m) || m.playerA === null || m.playerB === null) return;
+
+    const a = m.playerA;
+    const b = m.playerB;
+    const ga = m.score.a;
+    const gb = m.score.b;
+
+    if (!stats[a] || !stats[b]) return;
+
+    stats[a].played += 1;
+    stats[b].played += 1;
+    stats[a].gf += ga;
+    stats[a].ga += gb;
+    stats[b].gf += gb;
+    stats[b].ga += ga;
+
+    if (ga > gb) {
+      stats[a].wins += 1;
+      stats[b].losses += 1;
+      stats[a].points += 3;
+    } else if (gb > ga) {
+      stats[b].wins += 1;
+      stats[a].losses += 1;
+      stats[b].points += 3;
+    } else {
+      stats[a].draws += 1;
+      stats[b].draws += 1;
+      stats[a].points += 1;
+      stats[b].points += 1;
+    }
+  });
+
+  players.forEach(p => {
+    stats[p].gd = stats[p].gf - stats[p].ga;
+  });
+
+  return stats;
+}
+
+function rankPlayersByRules(players, stats, matchIds) {
+  const pointsBuckets = new Map();
+  players.forEach(player => {
+    const pts = stats[player].points;
+    if (!pointsBuckets.has(pts)) pointsBuckets.set(pts, []);
+    pointsBuckets.get(pts).push(player);
+  });
+
+  const sortedPointKeys = [...pointsBuckets.keys()].sort((a, b) => b - a);
+
+  const order = [];
+  const unresolvedSets = [];
+
+  sortedPointKeys.forEach(points => {
+    const bucket = pointsBuckets.get(points);
+
+    if (bucket.length === 2) {
+      const [x, y] = bucket;
+      const h2hWinner = headToHeadWinner(x, y, matchIds);
+      if (h2hWinner !== null) {
+        order.push(h2hWinner, h2hWinner === x ? y : x);
+        return;
+      }
+    }
+
+    const sorted = [...bucket].sort((a, b) => {
+      const gdDiff = stats[b].gd - stats[a].gd;
+      if (gdDiff !== 0) return gdDiff;
+
+      const gfDiff = stats[b].gf - stats[a].gf;
+      if (gfDiff !== 0) return gfDiff;
+
+      return playerName(a).localeCompare(playerName(b));
+    });
+
+    order.push(...sorted);
+
+    const tiesByGdGf = findGdGfTieSets(sorted, stats);
+    tiesByGdGf.forEach(setPlayers => {
+      if (setPlayers.length > 1) unresolvedSets.push(setPlayers);
+    });
+  });
+
+  return { order, unresolvedSets };
+}
+
+function findGdGfTieSets(sortedPlayers, stats) {
+  const sets = [];
+
+  let i = 0;
+  while (i < sortedPlayers.length) {
+    let j = i + 1;
+    while (
+      j < sortedPlayers.length &&
+      stats[sortedPlayers[i]].gd === stats[sortedPlayers[j]].gd &&
+      stats[sortedPlayers[i]].gf === stats[sortedPlayers[j]].gf
+    ) {
+      j += 1;
+    }
+
+    if (j - i > 1) {
+      sets.push(sortedPlayers.slice(i, j));
+    }
+
+    i = j;
+  }
+
+  return sets;
+}
+
+function headToHeadWinner(a, b, matchIds) {
+  let pointsA = 0;
+  let pointsB = 0;
+  let gdA = 0;
+
+  matchIds.forEach(matchId => {
+    const m = S.matches[matchId];
+    if (!m || !isMatchScored(m)) return;
+
+    const isAB = m.playerA === a && m.playerB === b;
+    const isBA = m.playerA === b && m.playerB === a;
+    if (!isAB && !isBA) return;
+
+    const ga = isAB ? m.score.a : m.score.b;
+    const gb = isAB ? m.score.b : m.score.a;
+
+    gdA += ga - gb;
+
+    if (ga > gb) pointsA += 3;
+    else if (gb > ga) pointsB += 3;
+    else {
+      pointsA += 1;
+      pointsB += 1;
+    }
+  });
+
+  if (pointsA > pointsB) return a;
+  if (pointsB > pointsA) return b;
+  if (gdA > 0) return a;
+  if (gdA < 0) return b;
+
+  return null;
+}
+
+function ensureTieStage(groupId, sourceType, sourceId, participants) {
+  const existing = findTieStage(groupId, sourceType, sourceId, participants);
+  if (existing) return existing;
+
+  const group = S.groups[groupId];
+  const sortedParticipants = [...participants].sort((a, b) => a - b);
+  const key = `${sourceType}|${sourceId || 'root'}|${participantsKey(sortedParticipants)}`;
+
+  const type = sortedParticipants.length === 2 ? 'duel' : 'mini';
+  const stageId = `TS-${groupId}-${S.nextTieStage++}`;
+
+  const stage = {
+    id: stageId,
+    key,
+    groupId,
+    sourceType,
+    sourceId,
+    participants: sortedParticipants,
+    type,
+    matchIds: []
+  };
+
+  if (type === 'duel') {
+    const matchId = `TB-${groupId}-${S.nextTieMatch++}`;
+    const duelLabel = sourceType === 'regular'
+      ? `Desempate Grupo ${groupId}`
+      : `Jogo extra Grupo ${groupId}`;
+
+    createMatch({
+      id: matchId,
+      label: duelLabel,
+      phase: 'groups',
+      kind: 'tie-duel',
+      mode: 'elimination',
+      groupId,
+      playerA: sortedParticipants[0],
+      playerB: sortedParticipants[1],
+      tieStageId: stageId
+    });
+
+    stage.matchIds.push(matchId);
+  } else {
+    let seq = 1;
+    for (let i = 0; i < sortedParticipants.length; i++) {
+      for (let j = i + 1; j < sortedParticipants.length; j++) {
+        const matchId = `TB-${groupId}-${S.nextTieMatch++}`;
+        createMatch({
+          id: matchId,
+          label: `Mini Grupo ${groupId} - Jogo ${seq++}`,
+          phase: 'groups',
+          kind: 'tie-mini',
+          mode: 'league',
+          groupId,
+          playerA: sortedParticipants[i],
+          playerB: sortedParticipants[j],
+          tieStageId: stageId
+        });
+        stage.matchIds.push(matchId);
+      }
+    }
+  }
+
+  group.tieStages.push(stage);
+  return stage;
+}
+
+function findTieStage(groupId, sourceType, sourceId, participants) {
+  const group = S.groups[groupId];
+  const key = `${sourceType}|${sourceId || 'root'}|${participantsKey(participants)}`;
+  return group.tieStages.find(stage => stage.key === key) || null;
+}
+
+function evaluateTieStage(stage, allowCreateStages) {
+  if (stage.type === 'duel') {
+    const m = S.matches[stage.matchIds[0]];
+    if (m && m.winner !== null) {
+      const loser = stage.participants.find(p => p !== m.winner);
+      return {
+        resolved: true,
+        order: [m.winner, loser],
+        blockers: []
+      };
+    }
+
+    return {
+      resolved: false,
+      order: [...stage.participants],
+      blockers: [`Jogo extra pendente: ${playerName(stage.participants[0])} x ${playerName(stage.participants[1])}.`]
+    };
+  }
+
+  const miniMatchesDone = stage.matchIds.every(matchId => isMatchScored(S.matches[matchId]));
+  const miniStats = computeStats(stage.participants, stage.matchIds);
+  const miniRank = rankPlayersByRules(stage.participants, miniStats, stage.matchIds);
+  let order = [...miniRank.order];
+
+  if (!miniMatchesDone) {
+    return {
+      resolved: false,
+      order,
+      blockers: [`Mini-tabela pendente no Grupo ${stage.groupId}.`]
+    };
+  }
+
+  const blockers = [];
+
+  miniRank.unresolvedSets.forEach(setPlayers => {
+    const childStage = allowCreateStages
+      ? ensureTieStage(stage.groupId, 'mini', stage.id, setPlayers)
+      : findTieStage(stage.groupId, 'mini', stage.id, setPlayers);
+
+    if (!childStage) {
+      blockers.push(`Desempate extra pendente no Grupo ${stage.groupId}.`);
+      return;
+    }
+
+    const childResult = evaluateTieStage(childStage, allowCreateStages);
+    order = replacePlayers(order, setPlayers, childResult.order);
+    if (!childResult.resolved) blockers.push(...childResult.blockers);
+  });
+
+  return {
+    resolved: blockers.length === 0,
+    order,
+    blockers
+  };
+}
+
+function replacePlayers(order, targetPlayers, replacementOrder) {
+  const targetSet = new Set(targetPlayers);
+  const targetIndexes = [];
+
+  order.forEach((player, idx) => {
+    if (targetSet.has(player)) targetIndexes.push(idx);
+  });
+
+  if (targetIndexes.length !== replacementOrder.length) return order;
+
+  const next = [...order];
+  targetIndexes.forEach((idx, i) => {
+    next[idx] = replacementOrder[i];
+  });
+
+  return next;
+}
+
+// ============================================
+// KNOCKOUT SEEDS + PROGRESSION
+// ============================================
+function syncKnockoutSeeds(groupA, groupB) {
+  const ready = groupA.resolved && groupB.resolved;
+  S.knockout.ready = ready;
+
+  if (!ready) {
+    setMatchPlayers('QF1', null, null);
+    setMatchPlayers('QF2', null, null);
+    setMatchPlayers('QF3', null, null);
+    setMatchPlayers('QF4', null, null);
+    return;
+  }
+
+  const a = groupA.order;
+  const b = groupB.order;
+
+  S.knockout.seeds = {
+    A: a.slice(0, 4),
+    B: b.slice(0, 4)
+  };
+
+  setMatchPlayers('QF1', a[0], b[3]);
+  setMatchPlayers('QF2', b[1], a[2]);
+  setMatchPlayers('QF3', b[0], a[3]);
+  setMatchPlayers('QF4', a[1], b[2]);
+}
+
+function syncKnockoutProgress() {
+  assignWinnerTo('QF1', 'SF1', 'A');
+  assignWinnerTo('QF2', 'SF1', 'B');
+  assignWinnerTo('QF3', 'SF2', 'A');
+  assignWinnerTo('QF4', 'SF2', 'B');
+  assignWinnerTo('SF1', 'F1', 'A');
+  assignWinnerTo('SF2', 'F1', 'B');
+}
+
+function assignWinnerTo(fromMatchId, toMatchId, slot) {
+  const fromMatch = S.matches[fromMatchId];
+  const toMatch = S.matches[toMatchId];
+  const nextPlayer = fromMatch.winner;
+
+  if (slot === 'A') {
+    if (toMatch.playerA !== nextPlayer) {
+      toMatch.playerA = nextPlayer;
+      resetMatchResult(toMatch);
+    }
+  } else {
+    if (toMatch.playerB !== nextPlayer) {
+      toMatch.playerB = nextPlayer;
+      resetMatchResult(toMatch);
+    }
+  }
+}
+
+function setMatchPlayers(matchId, playerA, playerB) {
+  const m = S.matches[matchId];
+  const changed = m.playerA !== playerA || m.playerB !== playerB;
+
+  if (changed) {
+    m.playerA = playerA;
+    m.playerB = playerB;
+    resetMatchResult(m);
+  }
+}
+
+function resetMatchResult(match) {
+  match.score = { a: null, b: null };
+  match.winner = null;
+  match.decidedByPenalties = false;
 }
 
 // ============================================
@@ -351,17 +1464,21 @@ function buildMatchCard(matchId) {
 // ============================================
 function openModal(matchId) {
   const m = S.matches[matchId];
+  if (!m || m.playerA === null || m.playerB === null) return;
+
+  const pA = playerName(m.playerA);
+  const pB = playerName(m.playerB);
   const tA = teamOf(m.playerA);
   const tB = teamOf(m.playerB);
-  const pA = PLAYERS[m.playerA];
-  const pB = PLAYERS[m.playerB];
 
-  const v = id => { const el = document.getElementById(id); return el && el.value !== '' ? parseInt(el.value, 10) : null; };
+  const titleHint = m.mode === 'elimination'
+    ? 'Empate no placar vai para penaltis.'
+    : 'Vitoria 3 pts, empate 1 pt, derrota 0 pt.';
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-header">
       <h3 class="modal-title">${m.label}</h3>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+      <button class="modal-close" onclick="closeModal()">X</button>
     </div>
 
     <div class="modal-matchup">
@@ -379,142 +1496,144 @@ function openModal(matchId) {
     </div>
 
     <div class="modal-scores">
-      <div class="modal-leg" style="${matchId === 'F1' ? 'flex:unset;width:100%;max-width:260px;margin:0 auto' : ''}">
-        <div class="modal-leg-title">${matchId === 'F1' ? 'PLACAR' : 'IDA &nbsp;·&nbsp; ' + pA + ' em casa'}</div>
+      <div class="modal-leg" style="flex:unset;width:100%">
+        <div class="modal-leg-title">PLACAR</div>
         <div class="modal-score-row">
-          <input type="number" min="0" max="20" class="score-input" id="l1a" value="${m.leg1.a !== null ? m.leg1.a : ''}">
-          <span class="score-dash">—</span>
-          <input type="number" min="0" max="20" class="score-input" id="l1b" value="${m.leg1.b !== null ? m.leg1.b : ''}">
+          <input type="number" min="0" max="20" class="score-input" id="score-a" value="${m.score.a !== null ? m.score.a : ''}">
+          <span class="score-dash">x</span>
+          <input type="number" min="0" max="20" class="score-input" id="score-b" value="${m.score.b !== null ? m.score.b : ''}">
         </div>
       </div>
-      ${matchId !== 'F1' ? `<div class="modal-leg">
-        <div class="modal-leg-title">VOLTA &nbsp;·&nbsp; ${pB} em casa</div>
-        <div class="modal-score-row">
-          <input type="number" min="0" max="20" class="score-input" id="l2a" value="${m.leg2.a !== null ? m.leg2.a : ''}">
-          <span class="score-dash">—</span>
-          <input type="number" min="0" max="20" class="score-input" id="l2b" value="${m.leg2.b !== null ? m.leg2.b : ''}">
-        </div>
-      </div>` : ''}
     </div>
 
-    <div class="modal-aggregate" id="modal-agg">${buildAggHtml(m, null, matchId === 'F1')}</div>
+    <div class="modal-aggregate" id="modal-summary">${buildModalSummary(m)}</div>
+
     <div id="modal-tie" class="modal-tiebreak" style="display:none">
-      <p>Empate — Quem avança?</p>
+      <p>Empate no placar. Escolha quem venceu nos penaltis.</p>
       <div class="tiebreak-btns">
-        <button class="btn-tiebreak" onclick="saveTiebreak('${matchId}',${m.playerA})">${pA}</button>
-        <button class="btn-tiebreak" onclick="saveTiebreak('${matchId}',${m.playerB})">${pB}</button>
+        <button class="btn-tiebreak" onclick="savePenaltyWinner('${matchId}', ${m.playerA})">${pA}</button>
+        <button class="btn-tiebreak" onclick="savePenaltyWinner('${matchId}', ${m.playerB})">${pB}</button>
       </div>
     </div>
 
-    <button class="btn-primary btn-save-score" onclick="saveScores('${matchId}')">Salvar Placar</button>
+    <div class="modal-hint">${titleHint}</div>
+    <button class="btn-primary btn-save-score" onclick="saveScores('${matchId}')">Salvar placar</button>
   `;
 
-  // Live aggregate on input
-  const isFinal = matchId === 'F1';
-  ['l1a','l1b','l2a','l2b'].forEach(id => {
+  ['score-a', 'score-b'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', () => {
-      const vals = { a1: v('l1a'), b1: v('l1b'), a2: v('l2a'), b2: v('l2b') };
-      document.getElementById('modal-agg').innerHTML = buildAggHtml(m, vals, isFinal);
+    el.addEventListener('input', () => {
+      document.getElementById('modal-summary').innerHTML = buildModalSummary(m, {
+        a: readScore('score-a'),
+        b: readScore('score-b')
+      });
+      document.getElementById('modal-tie').style.display = 'none';
     });
   });
 
   document.getElementById('match-modal').style.display = 'flex';
 }
 
-function buildAggHtml(m, vals, isFinal = false) {
-  const a1 = vals ? vals.a1 : m.leg1.a;
-  const b1 = vals ? vals.b1 : m.leg1.b;
-  const a2 = isFinal ? null : (vals ? vals.a2 : m.leg2.a);
-  const b2 = isFinal ? null : (vals ? vals.b2 : m.leg2.b);
+function buildModalSummary(match, preview = null) {
+  const a = preview ? preview.a : match.score.a;
+  const b = preview ? preview.b : match.score.b;
 
-  if (a1 === null && b1 === null) {
-    return `<p class="agg-placeholder">Insira o placar acima</p>`;
+  if (a === null || b === null) {
+    return '<p class="agg-placeholder">Insira o placar para salvar.</p>';
   }
 
-  const aggA = (a1 ?? 0) + (isFinal ? 0 : (a2 ?? 0));
-  const aggB = (b1 ?? 0) + (isFinal ? 0 : (b2 ?? 0));
-  const tie = aggA === aggB;
+  if (match.mode === 'league') {
+    if (a > b) return `<p class="agg-label">Resultado</p><p class="agg-tie">${playerName(match.playerA)} venceu.</p>`;
+    if (b > a) return `<p class="agg-label">Resultado</p><p class="agg-tie">${playerName(match.playerB)} venceu.</p>`;
+    return '<p class="agg-label">Resultado</p><p class="agg-tie">Empate.</p>';
+  }
 
-  const pA = PLAYERS[m.playerA];
-  const pB = PLAYERS[m.playerB];
+  if (a === b) {
+    return '<p class="agg-label">Resultado</p><p class="agg-tie">Empate: definir vencedor nos penaltis.</p>';
+  }
 
-  return `
-    <p class="agg-label">AGREGADO</p>
-    <div class="agg-display">
-      <span class="agg-name" style="text-align:right">${pA}</span>
-      <span class="agg-score ${aggA > aggB ? 'agg-lead' : aggA < aggB ? 'agg-trail' : ''}">${aggA}</span>
-      <span class="agg-dash-sep">—</span>
-      <span class="agg-score ${aggB > aggA ? 'agg-lead' : aggB < aggA ? 'agg-trail' : ''}">${aggB}</span>
-      <span class="agg-name">${pB}</span>
-    </div>
-    ${tie ? '<p class="agg-tie">Empate — pênaltis necessários</p>' : ''}
-  `;
+  return `<p class="agg-label">Resultado</p><p class="agg-tie">${a > b ? playerName(match.playerA) : playerName(match.playerB)} avanca.</p>`;
+}
+
+function readScore(id) {
+  const el = document.getElementById(id);
+  if (!el || el.value === '') return null;
+  return parseInt(el.value, 10);
 }
 
 function saveScores(matchId) {
-  const get = id => { const el = document.getElementById(id); return el && el.value !== '' ? parseInt(el.value, 10) : null; };
-  const l1a = get('l1a'), l1b = get('l1b'), l2a = get('l2a'), l2b = get('l2b');
-  const isFinal = matchId === 'F1';
-
   const m = S.matches[matchId];
-  m.leg1 = { a: l1a, b: l1b };
-  m.leg2 = isFinal ? { a: null, b: null } : { a: l2a, b: l2b };
+  if (!m) return;
 
-  // Resolve winner: final needs only leg1, others need both legs
-  const ready = isFinal ? (l1a !== null && l1b !== null) : (l1a !== null && l1b !== null && l2a !== null && l2b !== null);
-  if (ready) {
-    const aggA = isFinal ? l1a : l1a + l2a;
-    const aggB = isFinal ? l1b : l1b + l2b;
+  const a = readScore('score-a');
+  const b = readScore('score-b');
 
-    if (aggA > aggB) {
-      m.winner = m.playerA;
-      advanceWinner(matchId);
-      save();
-      closeModal();
-      renderTournament();
-    } else if (aggB > aggA) {
-      m.winner = m.playerB;
-      advanceWinner(matchId);
-      save();
-      closeModal();
-      renderTournament();
-    } else {
-      // Tie — show tiebreak UI
-      save();
-      document.getElementById('modal-tie').style.display = 'block';
-    }
-  } else {
-    save();
-    closeModal();
-    renderTournament();
+  m.score = { a, b };
+  m.decidedByPenalties = false;
+
+  if (m.mode === 'league') {
+    m.winner = null;
+    postScoreUpdate(matchId);
+    return;
   }
-}
 
-function saveTiebreak(matchId, winnerIdx) {
-  const m = S.matches[matchId];
-  m.winner = winnerIdx;
-  advanceWinner(matchId);
+  if (a === null || b === null) {
+    m.winner = null;
+    postScoreUpdate(matchId);
+    return;
+  }
+
+  if (a > b) {
+    m.winner = m.playerA;
+    postScoreUpdate(matchId);
+    return;
+  }
+
+  if (b > a) {
+    m.winner = m.playerB;
+    postScoreUpdate(matchId);
+    return;
+  }
+
+  m.winner = null;
   save();
-  closeModal();
-  renderTournament();
+  document.getElementById('modal-tie').style.display = 'block';
 }
 
-function advanceWinner(matchId) {
-  const winner = S.matches[matchId].winner;
-  Object.values(S.matches).forEach(m => {
-    if (m.feederA === matchId) m.playerA = winner;
-    if (m.feederB === matchId) m.playerB = winner;
-  });
+function savePenaltyWinner(matchId, winnerIdx) {
+  const m = S.matches[matchId];
+  if (!m) return;
+  m.winner = winnerIdx;
+  m.decidedByPenalties = true;
+  postScoreUpdate(matchId);
+}
 
-  if (matchId === 'F1') {
-    setTimeout(() => {
-      S.screen = 'champion';
-      save();
-      showScreen('champion');
-      renderChampion();
-    }, 600);
+function postScoreUpdate(matchId) {
+  syncTournamentState(true);
+  save();
+
+  closeModal();
+
+  if (matchId === 'F1' && S.matches.F1.winner !== null) {
+    showScreen('champion');
+    renderChampion();
+    return;
   }
+
+  const match = S.matches[matchId];
+  if (match && match.phase === 'groups') {
+    if (S.knockout.ready) {
+      showScreen('qualifiers');
+      renderQualifiersScreen();
+    } else {
+      showScreen('groups');
+      renderGroupsScreen();
+    }
+    return;
+  }
+
+  showScreen('qualifiers');
+  renderQualifiersScreen();
 }
 
 function closeModal() {
@@ -525,26 +1644,39 @@ function closeModalOutside(e) {
   if (e.target === document.getElementById('match-modal')) closeModal();
 }
 
+function isMatchScored(match) {
+  return match && match.score.a !== null && match.score.b !== null;
+}
+
+function isMatchComplete(match) {
+  if (!match) return false;
+  if (match.mode === 'league') return isMatchScored(match);
+  return match.winner !== null;
+}
+
 // ============================================
 // CHAMPION
 // ============================================
 function renderChampion() {
-  const m = S.matches['F1'];
+  const m = S.matches.F1;
   if (!m || m.winner === null) return;
 
   const team = teamOf(m.winner);
   document.getElementById('champion-details').innerHTML = `
     <img src="${team.logo}" class="champ-logo" alt="${team.name}" onerror="this.style.display='none'">
-    <div class="champ-player-name">${PLAYERS[m.winner]}</div>
+    <div class="champ-player-name">${playerName(m.winner)}</div>
     <div class="champ-team-name">${team.name}</div>
+    <div class="champ-note">${m.decidedByPenalties ? 'Titulo decidido nos penaltis.' : 'Titulo decidido no tempo normal.'}</div>
   `;
+
   spawnConfetti();
 }
 
 function spawnConfetti() {
   const cont = document.getElementById('confetti-container');
   cont.innerHTML = '';
-  const colors = ['#FFD700','#9333EA','#ffffff','#FFA500','#6B21A8','#FFF5B0'];
+  const colors = ['#FFD700', '#9333EA', '#ffffff', '#FFA500', '#6B21A8', '#FFF5B0'];
+
   for (let i = 0; i < 90; i++) {
     const p = document.createElement('div');
     p.className = 'confetti-piece';
@@ -565,8 +1697,10 @@ function spawnConfetti() {
 // RESET
 // ============================================
 function resetTournament() {
-  if (!confirm('Reiniciar o torneio? Todo progresso será perdido.')) return;
-  localStorage.removeItem('chimpas_v3');
-  S = { screen: 'splash', playerTeams: null, matches: null };
+  if (!confirm('Reiniciar o torneio? Todo progresso sera perdido.')) return;
+  clearGroupDrawTimers();
+  localStorage.removeItem(STORAGE_KEY);
+  S = createInitialState();
   showScreen('splash');
 }
+

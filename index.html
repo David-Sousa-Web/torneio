@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chimpas League</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== SPLASH ===== -->
+  <div id="screen-splash" class="screen active">
+    <div class="bg-image" id="splash-bg"></div>
+    <div class="bg-overlay splash-overlay"></div>
+    <div class="splash-content">
+      <p class="splash-sub">FIFA 26 &nbsp;•&nbsp; X1 CHAMPIONSHIP</p>
+      <button class="btn-primary btn-glow" onclick="startDraw()">INICIAR TORNEIO</button>
+    </div>
+  </div>
+
+  <!-- ===== DRAW TEAMS ===== -->
+  <div id="screen-draw" class="screen">
+    <div class="bg-image"></div>
+    <div class="bg-overlay dark-overlay"></div>
+    <div class="screen-scroll">
+      <div class="screen-inner">
+        <h2 class="screen-title">SORTEIO DE TIMES</h2>
+        <div id="draw-cards" class="draw-grid"></div>
+        <div id="draw-btn-row" class="btn-row hidden">
+          <button class="btn-primary" onclick="startBracketDraw()">SORTEAR BRACKET</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== BRACKET DRAW ===== -->
+  <div id="screen-bracket-draw" class="screen">
+    <div class="bg-image"></div>
+    <div class="bg-overlay dark-overlay"></div>
+    <div class="screen-scroll">
+      <div class="screen-inner">
+        <h2 class="screen-title">SORTEIO DO BRACKET</h2>
+        <div id="bracket-draw-content" class="bd-content"></div>
+        <div id="bracket-draw-btn-row" class="btn-row hidden">
+          <button class="btn-primary btn-glow" onclick="startTournament()">COMEÇAR TORNEIO</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOURNAMENT ===== -->
+  <div id="screen-tournament" class="screen">
+    <div class="bg-overlay tournament-overlay"></div>
+    <div class="tournament-wrap">
+      <div class="tournament-header">
+        <div class="tourn-logo">
+          <span class="tourn-stars">✦ ✦ ✦</span>
+          <span class="tourn-name">CHIMPAS LEAGUE</span>
+          <span class="tourn-stars">✦ ✦ ✦</span>
+        </div>
+        <button class="btn-reset" onclick="resetTournament()">↺ Reiniciar</button>
+      </div>
+      <div id="bracket-container" class="bracket-container"></div>
+    </div>
+  </div>
+
+  <!-- ===== CHAMPION ===== -->
+  <div id="screen-champion" class="screen">
+    <div class="bg-image" id="champ-bg"></div>
+    <div class="bg-overlay champion-overlay"></div>
+    <div id="confetti-container"></div>
+    <div class="champion-content">
+      <div class="champ-trophy">★</div>
+      <p class="champ-label">CAMPEÃO DA</p>
+      <h1 class="champ-title">CHIMPAS LEAGUE</h1>
+      <div id="champion-details" class="champ-details"></div>
+      <button class="btn-primary btn-glow" style="margin-top:32px" onclick="resetTournament()">↺ Novo Torneio</button>
+    </div>
+  </div>
+
+  <!-- ===== MATCH MODAL ===== -->
+  <div id="match-modal" class="modal-backdrop" style="display:none" onclick="closeModalOutside(event)">
+    <div class="modal-box" id="modal-content"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

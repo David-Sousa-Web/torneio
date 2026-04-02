@@ -25,8 +25,8 @@ const STORAGE_KEY = 'chimpas_v4';
 const GROUP_IDS = ['A', 'B'];
 const GROUP_DRAW_TOTAL_SLOTS = 10;
 const GROUP_DRAW_SLOTS_PER_GROUP = 5;
-const GROUP_DRAW_ROLL_MS = 1800;
-const GROUP_DRAW_LOCK_PAUSE_MS = 900;
+const GROUP_DRAW_ROLL_MS = 11250;
+const GROUP_DRAW_LOCK_PAUSE_MS = 1200;
 const GROUP_DRAW_INITIAL_DELAY_MS = 500;
 const GROUP_DRAW_CAROUSEL_VISIBLE = 7;
 
@@ -373,6 +373,7 @@ function renderGroupDrawCarousel(target, pool, centerPoolIndex, winner = false) 
   trackEl.style.transition = 'none';
   trackEl.style.transform = 'translate3d(0px,0px,0px)';
   trackEl.innerHTML = cards.join('');
+
 }
 
 function buildGroupDrawCarouselCard(playerIdx, opts = {}) {
@@ -581,7 +582,11 @@ function createMatch({ id, label, phase, kind, mode, round = null, groupId = nul
 function animateBracketDraw() {
   document.getElementById('bracket-draw-btn-row').classList.add('hidden');
   renderGroupDrawSkeleton();
+}
 
+function startGroupDrawSpin() {
+  const btnRow = document.getElementById('gd-start-btn-row');
+  if (btnRow) btnRow.remove();
   if (!S.groupDraw || !S.groupDraw.isAnimating) return;
   groupDrawStepTimer = setTimeout(animateNextGroupDrawSlot, GROUP_DRAW_INITIAL_DELAY_MS);
 }
@@ -642,22 +647,17 @@ function renderGroupDrawSkeleton() {
   grid.appendChild(buildGroupDrawAnimatedCard('A'));
   grid.appendChild(buildGroupDrawAnimatedCard('B'));
 
-  const map = document.createElement('div');
-  map.className = 'gd-map animate-pop';
-  map.innerHTML = `
-    <div class="gd-map-title">CRUZAMENTO DAS QUARTAS</div>
-    <div class="gd-map-line">QF1: A1 x B4</div>
-    <div class="gd-map-line">QF2: B2 x A3</div>
-    <div class="gd-map-line">QF3: B1 x A4</div>
-    <div class="gd-map-line">QF4: A2 x B3</div>
-  `;
+  const startBtnRow = document.createElement('div');
+  startBtnRow.id = 'gd-start-btn-row';
+  startBtnRow.className = 'gd-start-btn-row';
+  startBtnRow.innerHTML = `<button class="btn-primary btn-glow" onclick="startGroupDrawSpin()">INICIAR SORTEIO</button>`;
 
   const drawLayout = document.createElement('div');
   drawLayout.className = 'gd-draw-layout';
   drawLayout.appendChild(stageWrap);
   drawLayout.appendChild(grid);
+  content.appendChild(startBtnRow);
   content.appendChild(drawLayout);
-  content.appendChild(map);
 
   setTimeout(() => {
     document.querySelectorAll('.gd-group').forEach((el, idx) => {

@@ -527,7 +527,6 @@ function animateNextGroupDrawSlot() {
       groupDrawTransitionCleanup = null;
     }
 
-    trackEl.classList.remove('rolling');
     trackEl.style.transition = 'none';
     trackEl.style.transform = `translate3d(${endX}px,0px,0px)`;
     trackEl.getBoundingClientRect();

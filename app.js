@@ -18,7 +18,7 @@ const CL_TEAMS = [
   { name: 'Inter Milan',       short: 'Inter',     logo: 'https://upload.wikimedia.org/wikipedia/commons/0/05/FC_Internazionale_Milano_2021.svg',                           color: '#0068A8', initials: 'IM' },
   { name: 'Barcelona',         short: 'Barca',     logo: 'https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg',                                    color: '#A50044', initials: 'FC' },
   { name: 'Atletico Madrid',   short: 'Atletico',  logo: 'https://media.api-sports.io/football/teams/530.png',                                                              color: '#CB3524', initials: 'AT' },
-  { name: 'Borussia Dortmund', short: 'Dortmund',  logo: 'https://upload.wikimedia.org/wikipedia/commons/6/67/Borussia_Dortmund_logo.svg',                                 color: '#FDE100', initials: 'BD' }
+  { name: 'Chelsea',           short: 'Chelsea',   logo: 'https://upload.wikimedia.org/wikipedia/en/c/cc/Chelsea_FC.svg',                                                    color: '#034694', initials: 'CH' }
 ];
 
 const STORAGE_KEY = 'chimpas_v4';
@@ -203,15 +203,60 @@ function renderDrawAnimated() {
     grid.appendChild(buildDrawCard(i, false));
   });
 
-  PLAYERS.forEach((_, i) => {
-    setTimeout(() => {
-      const wrap = document.getElementById(`dc-${i}`);
-      if (wrap) wrap.querySelector('.draw-card').classList.add('flipped');
-      if (i === PLAYERS.length - 1) {
-        setTimeout(() => document.getElementById('draw-btn-row').classList.remove('hidden'), 700);
-      }
-    }, i * 650 + 600);
+  requestAnimationFrame(() => shuffleDrawCards(grid, (visualOrder) => {
+    visualOrder.forEach((playerIdx, pos) => {
+      setTimeout(() => {
+        const wrap = document.getElementById(`dc-${playerIdx}`);
+        if (wrap) wrap.querySelector('.draw-card').classList.add('flipped');
+        if (pos === visualOrder.length - 1) {
+          setTimeout(() => document.getElementById('draw-btn-row').classList.remove('hidden'), 700);
+        }
+      }, pos * 650 + 600);
+    });
+  }));
+}
+
+function shuffleDrawCards(grid, callback) {
+  const wraps = Array.from(grid.querySelectorAll('.draw-card-wrap'));
+  if (wraps.length === 0) { callback(); return; }
+
+  const positions = wraps.map(el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top };
   });
+
+  grid.classList.add('shuffling');
+
+  const ROUNDS = 8;
+  const INTERVAL = 300;
+  let round = 0;
+  let lastPerm = wraps.map((_, i) => i);
+
+  function doRound() {
+    const perm = shuffleArray([...Array(wraps.length).keys()]);
+    lastPerm = perm;
+
+    wraps.forEach((el, i) => {
+      const target = perm[i];
+      const dx = positions[target].x - positions[i].x;
+      const dy = positions[target].y - positions[i].y;
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+    });
+
+    round++;
+    if (round < ROUNDS) {
+      setTimeout(doRound, INTERVAL);
+    } else {
+      setTimeout(() => {
+        grid.classList.remove('shuffling');
+        const visualOrder = new Array(wraps.length);
+        lastPerm.forEach((target, i) => { visualOrder[target] = i; });
+        callback(visualOrder);
+      }, INTERVAL);
+    }
+  }
+
+  setTimeout(doRound, 400);
 }
 
 function renderDrawComplete() {

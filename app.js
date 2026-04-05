@@ -4,7 +4,7 @@
    ============================================ */
 
 const PLAYERS = [
-  'David', 'Flavio', 'Arroz', 'Bloado',
+  'David', 'Flavio', 'Gustavo', 'Arroz', 'Bloado',
   'Fabricio', 'Global', 'Gordo', 'MV', 'Pericles'
 ];
 
@@ -15,15 +15,16 @@ const CL_TEAMS = [
   { name: 'Liverpool',         short: 'Liverpool', logo: 'https://upload.wikimedia.org/wikipedia/en/0/0c/Liverpool_FC.svg',                                                 color: '#C8102E', initials: 'LV' },
   { name: 'Arsenal',           short: 'Arsenal',   logo: 'https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg',                                                   color: '#EF0107', initials: 'AR' },
   { name: 'PSG',               short: 'PSG',       logo: 'https://upload.wikimedia.org/wikipedia/en/a/a7/Paris_Saint-Germain_F.C..svg',                                    color: '#004170', initials: 'PS' },
+  { name: 'Inter Milan',       short: 'Inter',     logo: 'https://upload.wikimedia.org/wikipedia/commons/0/05/FC_Internazionale_Milano_2021.svg',                           color: '#0068A8', initials: 'IM' },
   { name: 'Barcelona',         short: 'Barca',     logo: 'https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg',                                    color: '#A50044', initials: 'FC' },
   { name: 'Atletico Madrid',   short: 'Atletico',  logo: 'https://media.api-sports.io/football/teams/530.png',                                                              color: '#CB3524', initials: 'AT' },
   { name: 'Chelsea',           short: 'Chelsea',   logo: 'https://upload.wikimedia.org/wikipedia/en/c/cc/Chelsea_FC.svg',                                                    color: '#034694', initials: 'CH' }
 ];
 
-const STORAGE_KEY = 'chimpas_v5';
-const GROUP_IDS = ['A', 'B', 'C'];
-const GROUP_DRAW_TOTAL_SLOTS = 9;
-const GROUP_DRAW_SLOTS_PER_GROUP = 3;
+const STORAGE_KEY = 'chimpas_v4';
+const GROUP_IDS = ['A', 'B'];
+const GROUP_DRAW_TOTAL_SLOTS = 10;
+const GROUP_DRAW_SLOTS_PER_GROUP = 5;
 const GROUP_DRAW_ROLL_MS = 11250;
 const GROUP_DRAW_LOCK_PAUSE_MS = 1200;
 const GROUP_DRAW_INITIAL_DELAY_MS = 500;
@@ -186,7 +187,7 @@ function unique(arr) {
 // SPLASH -> DRAW TEAMS
 // ============================================
 function startDraw() {
-  const teamOrder = shuffleArray([...Array(PLAYERS.length).keys()]);
+  const teamOrder = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   S.playerTeams = teamOrder;
   save();
   showScreen('draw');
@@ -295,20 +296,23 @@ function buildDrawCard(playerIdx, faceUp) {
 function startBracketDraw() {
   clearGroupDrawTimers();
 
-  const order = shuffleArray([...Array(PLAYERS.length).keys()]);
+  const order = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
   S.groupDraw = {
     order,
     step: 0,
     isAnimating: true,
     currentTarget: null,
     rollingPreview: null,
-    slots: createEmptyGroupSlots()
+    slots: {
+      A: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null),
+      B: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null)
+    }
   };
 
-  S.groups = {};
-  GROUP_IDS.forEach(id => {
-    S.groups[id] = { id, players: [], regularMatchIds: [], tieStages: [] };
-  });
+  S.groups = {
+    A: { id: 'A', players: [], regularMatchIds: [], tieStages: [] },
+    B: { id: 'B', players: [], regularMatchIds: [], tieStages: [] }
+  };
 
   S.matches = {};
   S.knockout = { ready: false, seeds: null };
@@ -321,27 +325,29 @@ function startBracketDraw() {
 }
 
 function hasCompletedGroupDraw() {
-  if (!S.groups) return false;
-  return GROUP_IDS.every(id =>
-    S.groups[id] &&
-    Array.isArray(S.groups[id].players) &&
-    S.groups[id].players.length === GROUP_DRAW_SLOTS_PER_GROUP
+  return !!(
+    S.groups &&
+    S.groups.A &&
+    S.groups.B &&
+    Array.isArray(S.groups.A.players) &&
+    Array.isArray(S.groups.B.players) &&
+    S.groups.A.players.length === GROUP_DRAW_SLOTS_PER_GROUP &&
+    S.groups.B.players.length === GROUP_DRAW_SLOTS_PER_GROUP
   );
 }
 
 function getGroupDrawTarget(step) {
   return {
-    groupId: GROUP_IDS[step % GROUP_IDS.length],
-    slotIndex: Math.floor(step / GROUP_IDS.length)
+    groupId: step % 2 === 0 ? 'A' : 'B',
+    slotIndex: Math.floor(step / 2)
   };
 }
 
 function createEmptyGroupSlots() {
-  const slots = {};
-  GROUP_IDS.forEach(id => {
-    slots[id] = new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null);
-  });
-  return slots;
+  return {
+    A: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null),
+    B: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null)
+  };
 }
 
 function fillSlotsFromOrder(order) {
@@ -364,17 +370,18 @@ function finalizeGroupDrawState() {
   S.groupDraw.step = order.length;
   S.groupDraw.isAnimating = false;
 
-  S.groups = {};
-  GROUP_IDS.forEach(id => {
-    S.groups[id] = { id, players: slots[id].filter(v => v !== null), regularMatchIds: [], tieStages: [] };
-  });
+  S.groups = {
+    A: { id: 'A', players: slots.A.filter(v => v !== null), regularMatchIds: [], tieStages: [] },
+    B: { id: 'B', players: slots.B.filter(v => v !== null), regularMatchIds: [], tieStages: [] }
+  };
 
   S.matches = {};
   S.knockout = { ready: false, seeds: null };
   S.nextTieStage = 1;
   S.nextTieMatch = 1;
 
-  GROUP_IDS.forEach(id => createGroupRoundRobin(id));
+  createGroupRoundRobin('A');
+  createGroupRoundRobin('B');
   createKnockoutMatches();
   save();
 }
@@ -589,7 +596,10 @@ function createGroupRoundRobin(groupId) {
 }
 
 function createKnockoutMatches() {
-  createMatch({ id: 'PI1', label: 'Play-in', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'play-in', playerA: null, playerB: null });
+  createMatch({ id: 'QF1', label: 'Quartas 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'QF2', label: 'Quartas 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'QF3', label: 'Quartas 3', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'QF4', label: 'Quartas 4', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
   createMatch({ id: 'SF1', label: 'Semi 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'semis', playerA: null, playerB: null });
   createMatch({ id: 'SF2', label: 'Semi 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'semis', playerA: null, playerB: null });
   createMatch({ id: 'F1', label: 'Final', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'final', playerA: null, playerB: null });
@@ -641,9 +651,21 @@ function renderBracketDrawComplete() {
 
   const grid = document.createElement('div');
   grid.className = 'gd-grid';
-  GROUP_IDS.forEach(id => grid.appendChild(buildGroupDrawCard(id)));
+  grid.appendChild(buildGroupDrawCard('A'));
+  grid.appendChild(buildGroupDrawCard('B'));
+
+  const map = document.createElement('div');
+  map.className = 'gd-map';
+  map.innerHTML = `
+    <div class="gd-map-title">CRUZAMENTO DAS QUARTAS</div>
+    <div class="gd-map-line">QF1: A1 x B4</div>
+    <div class="gd-map-line">QF2: B2 x A3</div>
+    <div class="gd-map-line">QF3: B1 x A4</div>
+    <div class="gd-map-line">QF4: A2 x B3</div>
+  `;
 
   content.appendChild(grid);
+  content.appendChild(map);
   document.getElementById('bracket-draw-btn-row').classList.remove('hidden');
 }
 
@@ -666,7 +688,8 @@ function renderGroupDrawSkeleton() {
 
   const grid = document.createElement('div');
   grid.className = 'gd-grid';
-  GROUP_IDS.forEach(id => grid.appendChild(buildGroupDrawAnimatedCard(id)));
+  grid.appendChild(buildGroupDrawAnimatedCard('A'));
+  grid.appendChild(buildGroupDrawAnimatedCard('B'));
 
   const startBtnRow = document.createElement('div');
   startBtnRow.id = 'gd-start-btn-row';
@@ -830,7 +853,7 @@ function renderGroupsScreen() {
   const groupsGrid = document.createElement('div');
   groupsGrid.className = 'group-stage-grid';
   GROUP_IDS.forEach(groupId => {
-    groupsGrid.appendChild(buildGroupPanel(groupId, state[groupId]));
+    groupsGrid.appendChild(buildGroupPanel(groupId, state[`group${groupId}`]));
   });
   groupsSection.appendChild(groupsGrid);
   layout.appendChild(groupsSection);
@@ -855,7 +878,7 @@ function renderQualifiersScreen() {
   koHeader.className = 'section-title-row';
   koHeader.innerHTML = `
     <div class="section-title">QUALIFICATÓRIAS</div>
-    <div class="knockout-status ${S.knockout.ready ? 'ok' : 'wait'}">${S.knockout.ready ? 'Mata-mata liberado' : 'Aguardando definicao dos grupos'}</div>
+    <div class="knockout-status ${S.knockout.ready ? 'ok' : 'wait'}">${S.knockout.ready ? 'Quartas liberadas' : 'Aguardando definicao dos grupos'}</div>
   `;
   koSection.appendChild(koHeader);
 
@@ -875,7 +898,7 @@ function buildGroupPanel(groupId, groupResult) {
   panel.className = 'group-panel';
 
   const subtitle = groupResult.regularComplete
-    ? (groupResult.resolved ? 'Classificacao definida.' : 'Desempates pendentes.')
+    ? (groupResult.resolved ? 'Classificacao definida para as quartas.' : 'Desempates pendentes.')
     : `Faltam ${groupResult.pendingRegularMatches} jogos da fase regular.`;
 
   panel.innerHTML = `
@@ -938,7 +961,7 @@ function buildStandingsTable(rows) {
 
 function renderKnockoutBoard(board) {
   const rounds = [
-    { title: 'PLAY-IN', ids: ['PI1'], cls: 'col-pi' },
+    { title: 'QUARTAS', ids: ['QF1', 'QF2', 'QF3', 'QF4'], cls: 'col-qf' },
     { title: 'SEMIFINAIS', ids: ['SF1', 'SF2'], cls: 'col-sf' },
     { title: 'FINAL', ids: ['F1'], cls: 'col-final' }
   ];
@@ -1038,15 +1061,13 @@ function buildMatchCard(matchId) {
 // GROUP RESOLUTION + TIEBREAKS
 // ============================================
 function syncTournamentState(allowCreateStages) {
-  const results = {};
-  GROUP_IDS.forEach(id => {
-    results[id] = getGroupResolution(id, allowCreateStages);
-  });
+  const groupA = getGroupResolution('A', allowCreateStages);
+  const groupB = getGroupResolution('B', allowCreateStages);
 
-  syncKnockoutSeeds(results);
+  syncKnockoutSeeds(groupA, groupB);
   syncKnockoutProgress();
 
-  return results;
+  return { groupA, groupB };
 }
 
 function getGroupResolution(groupId, allowCreateStages) {
@@ -1412,64 +1433,37 @@ function replacePlayers(order, targetPlayers, replacementOrder) {
 // ============================================
 // KNOCKOUT SEEDS + PROGRESSION
 // ============================================
-function computeCrossGroupRanking(groupResults) {
-  const allResolved = GROUP_IDS.every(id => groupResults[id].resolved);
-  if (!allResolved) return null;
-
-  const qualified = [];
-
-  GROUP_IDS.forEach(id => {
-    const res = groupResults[id];
-    const first = res.order[0];
-    const second = res.order[1];
-    const stats = {};
-    res.rows.forEach(r => { stats[r.player] = r; });
-    qualified.push({ player: first, ...stats[first], source: `${id}1` });
-    qualified.push({ player: second, ...stats[second], source: `${id}2`, isSecond: true });
-  });
-
-  const seconds = qualified.filter(q => q.isSecond);
-  seconds.sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.gd !== a.gd) return b.gd - a.gd;
-    if (b.gf !== a.gf) return b.gf - a.gf;
-    return playerName(a.player).localeCompare(playerName(b.player));
-  });
-
-  const top5 = qualified.filter(q => !q.isSecond).concat(seconds.slice(0, 2));
-
-  top5.sort((a, b) => {
-    if (b.points !== a.points) return b.points - a.points;
-    if (b.gd !== a.gd) return b.gd - a.gd;
-    if (b.gf !== a.gf) return b.gf - a.gf;
-    return playerName(a.player).localeCompare(playerName(b.player));
-  });
-
-  return { seeds: top5.map(q => q.player) };
-}
-
-function syncKnockoutSeeds(groupResults) {
-  const ranking = computeCrossGroupRanking(groupResults);
-  const ready = ranking !== null;
+function syncKnockoutSeeds(groupA, groupB) {
+  const ready = groupA.resolved && groupB.resolved;
   S.knockout.ready = ready;
 
   if (!ready) {
-    setMatchPlayers('PI1', null, null);
-    setMatchPlayers('SF1', null, null);
-    setMatchPlayers('SF2', null, null);
+    setMatchPlayers('QF1', null, null);
+    setMatchPlayers('QF2', null, null);
+    setMatchPlayers('QF3', null, null);
+    setMatchPlayers('QF4', null, null);
     return;
   }
 
-  const seeds = ranking.seeds;
-  S.knockout.seeds = seeds;
+  const a = groupA.order;
+  const b = groupB.order;
 
-  setMatchPlayers('PI1', seeds[3], seeds[4]);
-  setMatchPlayers('SF1', seeds[0], null);
-  setMatchPlayers('SF2', seeds[1], seeds[2]);
+  S.knockout.seeds = {
+    A: a.slice(0, 4),
+    B: b.slice(0, 4)
+  };
+
+  setMatchPlayers('QF1', a[0], b[3]);
+  setMatchPlayers('QF2', b[1], a[2]);
+  setMatchPlayers('QF3', b[0], a[3]);
+  setMatchPlayers('QF4', a[1], b[2]);
 }
 
 function syncKnockoutProgress() {
-  assignWinnerTo('PI1', 'SF1', 'B');
+  assignWinnerTo('QF1', 'SF1', 'A');
+  assignWinnerTo('QF2', 'SF1', 'B');
+  assignWinnerTo('QF3', 'SF2', 'A');
+  assignWinnerTo('QF4', 'SF2', 'B');
   assignWinnerTo('SF1', 'F1', 'A');
   assignWinnerTo('SF2', 'F1', 'B');
 }

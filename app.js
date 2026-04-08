@@ -30,6 +30,7 @@ const GROUP_DRAW_ROLL_MS = 11250;
 const GROUP_DRAW_LOCK_PAUSE_MS = 1200;
 const GROUP_DRAW_INITIAL_DELAY_MS = 500;
 const GROUP_DRAW_CAROUSEL_VISIBLE = 7;
+const GROUP_MATCH_LABEL_PREFIX = 'Fase de Grupos - Jogo';
 
 let S = {};
 let groupDrawStepTimer = null;
@@ -52,6 +53,9 @@ window.addEventListener('DOMContentLoaded', () => {
       const oldState = JSON.parse(oldSaved);
       if (isValidState(oldState)) {
         S = migrateV4toV5(oldState);
+        if (needsGroupMatchNormalization()) {
+          normalizeGroupRegularMatches({ shufflePending: true });
+        }
         save();
         localStorage.removeItem('chimpas_v4');
         restoreScreen();
@@ -68,6 +72,10 @@ window.addEventListener('DOMContentLoaded', () => {
       const parsed = JSON.parse(saved);
       if (isValidState(parsed)) {
         S = parsed;
+        if (needsGroupMatchNormalization()) {
+          normalizeGroupRegularMatches({ shufflePending: true });
+          save();
+        }
         restoreScreen();
         return;
       }
@@ -293,6 +301,79 @@ function shuffleArray(arr) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+function formatGroupMatchLabel(seq) {
+  return `${GROUP_MATCH_LABEL_PREFIX} ${seq}`;
+}
+
+function collectGroupRegularMatchIds(groupId) {
+  const group = S.groups?.[groupId];
+  if (!group || !Array.isArray(group.regularMatchIds)) return [];
+
+  return group.regularMatchIds.filter(matchId => {
+    const match = S.matches?.[matchId];
+    return !!match && match.kind === 'group-regular';
+  });
+}
+
+function renumberGroupRegularMatches() {
+  if (!S.groups || !S.matches) return;
+
+  let seq = 1;
+  GROUP_IDS.forEach(groupId => {
+    const ids = collectGroupRegularMatchIds(groupId);
+    ids.forEach(matchId => {
+      S.matches[matchId].label = formatGroupMatchLabel(seq++);
+    });
+  });
+}
+
+function normalizeGroupRegularMatches({ shufflePending = false } = {}) {
+  if (!S.groups || !S.matches) return;
+
+  GROUP_IDS.forEach(groupId => {
+    const group = S.groups[groupId];
+    if (!group || !Array.isArray(group.regularMatchIds)) return;
+
+    const validIds = collectGroupRegularMatchIds(groupId);
+    if (!shufflePending) {
+      group.regularMatchIds = validIds;
+      return;
+    }
+
+    const played = [];
+    const pending = [];
+
+    validIds.forEach(matchId => {
+      const match = S.matches[matchId];
+      if (isMatchScored(match)) {
+        played.push(matchId);
+      } else {
+        pending.push(matchId);
+      }
+    });
+
+    group.regularMatchIds = [...played, ...shuffleArray(pending)];
+  });
+
+  renumberGroupRegularMatches();
+}
+
+function needsGroupMatchNormalization() {
+  if (!S.groups || !S.matches) return false;
+
+  let seq = 1;
+  for (const groupId of GROUP_IDS) {
+    const ids = collectGroupRegularMatchIds(groupId);
+    for (const matchId of ids) {
+      if (S.matches[matchId].label !== formatGroupMatchLabel(seq++)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function playerName(playerIdx) {
@@ -534,6 +615,7 @@ function finalizeGroupDrawState() {
 
   GROUP_IDS.forEach(id => createGroupRoundRobin(id));
   createKnockoutMatches();
+  normalizeGroupRegularMatches({ shufflePending: true });
   save();
 }
 
@@ -733,7 +815,7 @@ function createGroupRoundRobin(groupId) {
       const matchId = `G-${groupId}-${seq++}`;
       createMatch({
         id: matchId,
-        label: `Jogo ${seq - 1}`,
+        label: formatGroupMatchLabel(seq - 1),
         phase: 'groups',
         kind: 'group-regular',
         mode: 'league',
@@ -1051,7 +1133,7 @@ function buildGroupPanel(groupId, groupResult) {
   const list = panel.querySelector(`#group-matches-${groupId}`);
 
   const played = group.regularMatchIds.filter(id => isMatchScored(S.matches[id]));
-  const pending = shuffleArray(group.regularMatchIds.filter(id => !isMatchScored(S.matches[id])));
+  const pending = group.regularMatchIds.filter(id => !isMatchScored(S.matches[id]));
   [...played, ...pending].forEach(matchId => list.appendChild(buildMatchCard(matchId)));
 
   if (groupResult.tieMatchIds.length) {

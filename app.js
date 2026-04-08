@@ -21,10 +21,11 @@ const CL_TEAMS = [
   { name: 'Chelsea',           short: 'Chelsea',   logo: 'https://upload.wikimedia.org/wikipedia/en/c/cc/Chelsea_FC.svg',                                                    color: '#034694', initials: 'CH' }
 ];
 
-const STORAGE_KEY = 'chimpas_v4';
-const GROUP_IDS = ['A', 'B'];
-const GROUP_DRAW_TOTAL_SLOTS = 10;
-const GROUP_DRAW_SLOTS_PER_GROUP = 5;
+const STORAGE_KEY = 'chimpas_v5';
+const EXCLUDED_PLAYERS = [3, 7]; // Arroz, Gordo
+const GROUP_IDS = ['A'];
+const GROUP_DRAW_TOTAL_SLOTS = 8;
+const GROUP_DRAW_SLOTS_PER_GROUP = 8;
 const GROUP_DRAW_ROLL_MS = 11250;
 const GROUP_DRAW_LOCK_PAUSE_MS = 1200;
 const GROUP_DRAW_INITIAL_DELAY_MS = 500;
@@ -44,6 +45,23 @@ window.addEventListener('DOMContentLoaded', () => {
     el.style.backgroundImage = bgImg;
   });
 
+  // Try migrating from v4
+  const oldSaved = localStorage.getItem('chimpas_v4');
+  if (oldSaved) {
+    try {
+      const oldState = JSON.parse(oldSaved);
+      if (isValidState(oldState)) {
+        S = migrateV4toV5(oldState);
+        save();
+        localStorage.removeItem('chimpas_v4');
+        restoreScreen();
+        return;
+      }
+    } catch (e) {
+      // Ignore broken state.
+    }
+  }
+
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     try {
@@ -61,6 +79,122 @@ window.addEventListener('DOMContentLoaded', () => {
   S = createInitialState();
   showScreen('splash');
 });
+
+function migrateV4toV5(old) {
+  const groupAPlayers = old.groups.A.players; // [2,4,6,0,8]
+  const groupBPlayersFiltered = old.groups.B.players.filter(p => !EXCLUDED_PLAYERS.includes(p)); // [5,9,1]
+  const allPlayers = [...groupAPlayers, ...groupBPlayersFiltered]; // [2,4,6,0,8,5,9,1]
+
+  const newMatches = {};
+  let seq = 1;    // sequential label counter
+  let nextId = 1; // sequential match id counter
+
+  // Keep all group A matches, renaming labels sequentially
+  const keptAMatches = [];
+  old.groups.A.regularMatchIds.forEach(id => {
+    const newId = `G-A-${nextId++}`;
+    newMatches[newId] = { ...old.matches[id], id: newId, label: `Jogo ${seq++}` };
+    keptAMatches.push(newId);
+  });
+
+  // Keep group B matches that don't involve excluded players, re-id them
+  const keptBMatches = [];
+  old.groups.B.regularMatchIds.forEach(id => {
+    const m = old.matches[id];
+    if (EXCLUDED_PLAYERS.includes(m.playerA) || EXCLUDED_PLAYERS.includes(m.playerB)) return;
+    const newId = `G-A-${nextId++}`;
+    newMatches[newId] = { ...m, id: newId, groupId: 'A', label: `Jogo ${seq++}` };
+    keptBMatches.push(newId);
+  });
+
+  // Generate cross-group matches (A players × B remaining players)
+  const existingPairs = new Set();
+  Object.values(newMatches).forEach(m => {
+    if (m.playerA !== null && m.playerB !== null) {
+      const key = [Math.min(m.playerA, m.playerB), Math.max(m.playerA, m.playerB)].join('-');
+      existingPairs.add(key);
+    }
+  });
+
+  const crossMatches = [];
+  for (const pA of groupAPlayers) {
+    for (const pB of groupBPlayersFiltered) {
+      const key = [Math.min(pA, pB), Math.max(pA, pB)].join('-');
+      if (existingPairs.has(key)) continue;
+      const newId = `G-A-${nextId++}`;
+      newMatches[newId] = {
+        id: newId,
+        label: `Jogo ${seq++}`,
+        phase: 'groups',
+        kind: 'group-regular',
+        mode: 'league',
+        round: null,
+        groupId: 'A',
+        tieStageId: null,
+        playerA: pA,
+        playerB: pB,
+        score: { a: null, b: null },
+        winner: null,
+        decidedByPenalties: false
+      };
+      crossMatches.push(newId);
+    }
+  }
+
+  const allMatchIds = [
+    ...keptAMatches,
+    ...keptBMatches,
+    ...crossMatches
+  ];
+
+  // Create knockout matches (PI1, PI2, SF1, SF2, F1)
+  const koIds = ['PI1', 'PI2', 'SF1', 'SF2', 'F1'];
+  const koLabels = { PI1: 'Play-in 1', PI2: 'Play-in 2', SF1: 'Semi 1', SF2: 'Semi 2', F1: 'Final' };
+  const koRounds = { PI1: 'playin', PI2: 'playin', SF1: 'semis', SF2: 'semis', F1: 'final' };
+
+  koIds.forEach(id => {
+    newMatches[id] = {
+      id,
+      label: koLabels[id],
+      phase: 'knockout',
+      kind: 'knockout',
+      mode: 'elimination',
+      round: koRounds[id],
+      groupId: null,
+      tieStageId: null,
+      playerA: null,
+      playerB: null,
+      score: { a: null, b: null },
+      winner: null,
+      decidedByPenalties: false
+    };
+  });
+
+  return {
+    screen: 'groups',
+    playerTeams: old.playerTeams,
+    groups: {
+      A: {
+        id: 'A',
+        players: allPlayers,
+        regularMatchIds: allMatchIds,
+        tieStages: []
+      }
+    },
+    groupDraw: {
+      order: allPlayers,
+      step: allPlayers.length,
+      isAnimating: false,
+      currentTarget: { groupId: 'A', slotIndex: allPlayers.length - 1 },
+      rollingPreview: allPlayers[allPlayers.length - 1],
+      slots: { A: [...allPlayers] }
+    },
+    matches: newMatches,
+    knockout: { ready: false, seeds: null },
+    nextTieStage: 1,
+    nextTieMatch: 1
+  };
+}
 
 function createInitialState() {
   return {
@@ -186,9 +320,24 @@ function unique(arr) {
 // ============================================
 // SPLASH -> DRAW TEAMS
 // ============================================
+function getActivePlayers() {
+  return PLAYERS.map((_, i) => i).filter(i => !EXCLUDED_PLAYERS.includes(i));
+}
+
+function getActiveTeams() {
+  return CL_TEAMS.map((_, i) => i).filter(i => !EXCLUDED_PLAYERS.includes(i));
+}
+
 function startDraw() {
-  const teamOrder = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  S.playerTeams = teamOrder;
+  const activeTeams = getActiveTeams();
+  const teamOrder = shuffleArray(activeTeams);
+  // Build full array with nulls for excluded
+  const fullOrder = new Array(PLAYERS.length).fill(null);
+  const activePlayers = getActivePlayers();
+  activePlayers.forEach((playerIdx, i) => {
+    fullOrder[playerIdx] = teamOrder[i];
+  });
+  S.playerTeams = fullOrder;
   save();
   showScreen('draw');
   renderDrawAnimated();
@@ -199,7 +348,8 @@ function renderDrawAnimated() {
   grid.innerHTML = '';
   document.getElementById('draw-btn-row').classList.add('hidden');
 
-  PLAYERS.forEach((name, i) => {
+  const active = getActivePlayers();
+  active.forEach(i => {
     grid.appendChild(buildDrawCard(i, false));
   });
 
@@ -262,7 +412,7 @@ function shuffleDrawCards(grid, callback) {
 function renderDrawComplete() {
   const grid = document.getElementById('draw-cards');
   grid.innerHTML = '';
-  PLAYERS.forEach((_, i) => grid.appendChild(buildDrawCard(i, true)));
+  getActivePlayers().forEach(i => grid.appendChild(buildDrawCard(i, true)));
   document.getElementById('draw-btn-row').classList.remove('hidden');
 }
 
@@ -296,23 +446,25 @@ function buildDrawCard(playerIdx, faceUp) {
 function startBracketDraw() {
   clearGroupDrawTimers();
 
-  const order = shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const order = shuffleArray(getActivePlayers());
+
+  const slots = {};
+  const groups = {};
+  GROUP_IDS.forEach(id => {
+    slots[id] = new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null);
+    groups[id] = { id, players: [], regularMatchIds: [], tieStages: [] };
+  });
+
   S.groupDraw = {
     order,
     step: 0,
     isAnimating: true,
     currentTarget: null,
     rollingPreview: null,
-    slots: {
-      A: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null),
-      B: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null)
-    }
+    slots
   };
 
-  S.groups = {
-    A: { id: 'A', players: [], regularMatchIds: [], tieStages: [] },
-    B: { id: 'B', players: [], regularMatchIds: [], tieStages: [] }
-  };
+  S.groups = groups;
 
   S.matches = {};
   S.knockout = { ready: false, seeds: null };
@@ -325,29 +477,28 @@ function startBracketDraw() {
 }
 
 function hasCompletedGroupDraw() {
-  return !!(
-    S.groups &&
-    S.groups.A &&
-    S.groups.B &&
-    Array.isArray(S.groups.A.players) &&
-    Array.isArray(S.groups.B.players) &&
-    S.groups.A.players.length === GROUP_DRAW_SLOTS_PER_GROUP &&
-    S.groups.B.players.length === GROUP_DRAW_SLOTS_PER_GROUP
+  if (!S.groups) return false;
+  return GROUP_IDS.every(id =>
+    S.groups[id] &&
+    Array.isArray(S.groups[id].players) &&
+    S.groups[id].players.length === GROUP_DRAW_SLOTS_PER_GROUP
   );
 }
 
 function getGroupDrawTarget(step) {
+  const groupCount = GROUP_IDS.length;
   return {
-    groupId: step % 2 === 0 ? 'A' : 'B',
-    slotIndex: Math.floor(step / 2)
+    groupId: GROUP_IDS[step % groupCount],
+    slotIndex: Math.floor(step / groupCount)
   };
 }
 
 function createEmptyGroupSlots() {
-  return {
-    A: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null),
-    B: new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null)
-  };
+  const slots = {};
+  GROUP_IDS.forEach(id => {
+    slots[id] = new Array(GROUP_DRAW_SLOTS_PER_GROUP).fill(null);
+  });
+  return slots;
 }
 
 function fillSlotsFromOrder(order) {
@@ -370,18 +521,18 @@ function finalizeGroupDrawState() {
   S.groupDraw.step = order.length;
   S.groupDraw.isAnimating = false;
 
-  S.groups = {
-    A: { id: 'A', players: slots.A.filter(v => v !== null), regularMatchIds: [], tieStages: [] },
-    B: { id: 'B', players: slots.B.filter(v => v !== null), regularMatchIds: [], tieStages: [] }
-  };
+  const groups = {};
+  GROUP_IDS.forEach(id => {
+    groups[id] = { id, players: slots[id].filter(v => v !== null), regularMatchIds: [], tieStages: [] };
+  });
+  S.groups = groups;
 
   S.matches = {};
   S.knockout = { ready: false, seeds: null };
   S.nextTieStage = 1;
   S.nextTieMatch = 1;
 
-  createGroupRoundRobin('A');
-  createGroupRoundRobin('B');
+  GROUP_IDS.forEach(id => createGroupRoundRobin(id));
   createKnockoutMatches();
   save();
 }
@@ -582,7 +733,7 @@ function createGroupRoundRobin(groupId) {
       const matchId = `G-${groupId}-${seq++}`;
       createMatch({
         id: matchId,
-        label: `Grupo ${groupId} - Rodada ${seq - 1}`,
+        label: `Jogo ${seq - 1}`,
         phase: 'groups',
         kind: 'group-regular',
         mode: 'league',
@@ -596,10 +747,8 @@ function createGroupRoundRobin(groupId) {
 }
 
 function createKnockoutMatches() {
-  createMatch({ id: 'QF1', label: 'Quartas 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
-  createMatch({ id: 'QF2', label: 'Quartas 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
-  createMatch({ id: 'QF3', label: 'Quartas 3', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
-  createMatch({ id: 'QF4', label: 'Quartas 4', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'quarters', playerA: null, playerB: null });
+  createMatch({ id: 'PI1', label: 'Play-in 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'playin', playerA: null, playerB: null });
+  createMatch({ id: 'PI2', label: 'Play-in 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'playin', playerA: null, playerB: null });
   createMatch({ id: 'SF1', label: 'Semi 1', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'semis', playerA: null, playerB: null });
   createMatch({ id: 'SF2', label: 'Semi 2', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'semis', playerA: null, playerB: null });
   createMatch({ id: 'F1', label: 'Final', phase: 'knockout', kind: 'knockout', mode: 'elimination', round: 'final', playerA: null, playerB: null });
@@ -651,21 +800,9 @@ function renderBracketDrawComplete() {
 
   const grid = document.createElement('div');
   grid.className = 'gd-grid';
-  grid.appendChild(buildGroupDrawCard('A'));
-  grid.appendChild(buildGroupDrawCard('B'));
-
-  const map = document.createElement('div');
-  map.className = 'gd-map';
-  map.innerHTML = `
-    <div class="gd-map-title">CRUZAMENTO DAS QUARTAS</div>
-    <div class="gd-map-line">QF1: A1 x B4</div>
-    <div class="gd-map-line">QF2: B2 x A3</div>
-    <div class="gd-map-line">QF3: B1 x A4</div>
-    <div class="gd-map-line">QF4: A2 x B3</div>
-  `;
+  GROUP_IDS.forEach(id => grid.appendChild(buildGroupDrawCard(id)));
 
   content.appendChild(grid);
-  content.appendChild(map);
   document.getElementById('bracket-draw-btn-row').classList.remove('hidden');
 }
 
@@ -688,8 +825,7 @@ function renderGroupDrawSkeleton() {
 
   const grid = document.createElement('div');
   grid.className = 'gd-grid';
-  grid.appendChild(buildGroupDrawAnimatedCard('A'));
-  grid.appendChild(buildGroupDrawAnimatedCard('B'));
+  GROUP_IDS.forEach(id => grid.appendChild(buildGroupDrawAnimatedCard(id)));
 
   const startBtnRow = document.createElement('div');
   startBtnRow.id = 'gd-start-btn-row';
@@ -878,7 +1014,7 @@ function renderQualifiersScreen() {
   koHeader.className = 'section-title-row';
   koHeader.innerHTML = `
     <div class="section-title">QUALIFICATÓRIAS</div>
-    <div class="knockout-status ${S.knockout.ready ? 'ok' : 'wait'}">${S.knockout.ready ? 'Quartas liberadas' : 'Aguardando definicao dos grupos'}</div>
+    <div class="knockout-status ${S.knockout.ready ? 'ok' : 'wait'}">${S.knockout.ready ? 'Mata-mata liberado' : 'Aguardando definicao dos grupos'}</div>
   `;
   koSection.appendChild(koHeader);
 
@@ -898,12 +1034,12 @@ function buildGroupPanel(groupId, groupResult) {
   panel.className = 'group-panel';
 
   const subtitle = groupResult.regularComplete
-    ? (groupResult.resolved ? 'Classificacao definida para as quartas.' : 'Desempates pendentes.')
+    ? (groupResult.resolved ? 'Classificacao definida.' : 'Desempates pendentes.')
     : `Faltam ${groupResult.pendingRegularMatches} jogos da fase regular.`;
 
   panel.innerHTML = `
     <div class="group-panel-head">
-      <div class="group-panel-title">GRUPO ${groupId}</div>
+      <div class="group-panel-title">${GROUP_IDS.length === 1 ? 'CLASSIFICAÇÃO' : `GRUPO ${groupId}`}</div>
       <div class="group-panel-subtitle">${subtitle}</div>
     </div>
     ${buildStandingsTable(groupResult.rows)}
@@ -913,7 +1049,10 @@ function buildGroupPanel(groupId, groupResult) {
   `;
 
   const list = panel.querySelector(`#group-matches-${groupId}`);
-  group.regularMatchIds.forEach(matchId => list.appendChild(buildMatchCard(matchId)));
+
+  const played = group.regularMatchIds.filter(id => isMatchScored(S.matches[id]));
+  const pending = shuffleArray(group.regularMatchIds.filter(id => !isMatchScored(S.matches[id])));
+  [...played, ...pending].forEach(matchId => list.appendChild(buildMatchCard(matchId)));
 
   if (groupResult.tieMatchIds.length) {
     const tieTitle = document.createElement('div');
@@ -961,7 +1100,7 @@ function buildStandingsTable(rows) {
 
 function renderKnockoutBoard(board) {
   const rounds = [
-    { title: 'QUARTAS', ids: ['QF1', 'QF2', 'QF3', 'QF4'], cls: 'col-qf' },
+    { title: 'PLAY-IN', ids: ['PI1', 'PI2'], cls: 'col-pi' },
     { title: 'SEMIFINAIS', ids: ['SF1', 'SF2'], cls: 'col-sf' },
     { title: 'FINAL', ids: ['F1'], cls: 'col-final' }
   ];
@@ -1061,13 +1200,15 @@ function buildMatchCard(matchId) {
 // GROUP RESOLUTION + TIEBREAKS
 // ============================================
 function syncTournamentState(allowCreateStages) {
-  const groupA = getGroupResolution('A', allowCreateStages);
-  const groupB = getGroupResolution('B', allowCreateStages);
+  const result = {};
+  GROUP_IDS.forEach(id => {
+    result[`group${id}`] = getGroupResolution(id, allowCreateStages);
+  });
 
-  syncKnockoutSeeds(groupA, groupB);
+  syncKnockoutSeeds(result.groupA);
   syncKnockoutProgress();
 
-  return { groupA, groupB };
+  return result;
 }
 
 function getGroupResolution(groupId, allowCreateStages) {
@@ -1433,37 +1574,42 @@ function replacePlayers(order, targetPlayers, replacementOrder) {
 // ============================================
 // KNOCKOUT SEEDS + PROGRESSION
 // ============================================
-function syncKnockoutSeeds(groupA, groupB) {
-  const ready = groupA.resolved && groupB.resolved;
+function syncKnockoutSeeds(groupA) {
+  const ready = groupA.resolved;
   S.knockout.ready = ready;
 
   if (!ready) {
-    setMatchPlayers('QF1', null, null);
-    setMatchPlayers('QF2', null, null);
-    setMatchPlayers('QF3', null, null);
-    setMatchPlayers('QF4', null, null);
+    setMatchPlayers('PI1', null, null);
+    setMatchPlayers('PI2', null, null);
+    setMatchPlayers('SF1', null, null);
+    setMatchPlayers('SF2', null, null);
     return;
   }
 
-  const a = groupA.order;
-  const b = groupB.order;
+  const order = groupA.order; // 8 players ranked
 
-  S.knockout.seeds = {
-    A: a.slice(0, 4),
-    B: b.slice(0, 4)
-  };
+  S.knockout.seeds = { A: order.slice(0, 6) };
 
-  setMatchPlayers('QF1', a[0], b[3]);
-  setMatchPlayers('QF2', b[1], a[2]);
-  setMatchPlayers('QF3', b[0], a[3]);
-  setMatchPlayers('QF4', a[1], b[2]);
+  // 3rd vs 6th → PI1, 4th vs 5th → PI2
+  setMatchPlayers('PI1', order[2], order[5]);
+  setMatchPlayers('PI2', order[3], order[4]);
+
+  // 1st → SF1 playerA, 2nd → SF2 playerA (keep playerB from progression)
+  const sf1 = S.matches.SF1;
+  if (sf1.playerA !== order[0]) {
+    sf1.playerA = order[0];
+    resetMatchResult(sf1);
+  }
+  const sf2 = S.matches.SF2;
+  if (sf2.playerA !== order[1]) {
+    sf2.playerA = order[1];
+    resetMatchResult(sf2);
+  }
 }
 
 function syncKnockoutProgress() {
-  assignWinnerTo('QF1', 'SF1', 'A');
-  assignWinnerTo('QF2', 'SF1', 'B');
-  assignWinnerTo('QF3', 'SF2', 'A');
-  assignWinnerTo('QF4', 'SF2', 'B');
+  assignWinnerTo('PI1', 'SF2', 'B');
+  assignWinnerTo('PI2', 'SF1', 'B');
   assignWinnerTo('SF1', 'F1', 'A');
   assignWinnerTo('SF2', 'F1', 'B');
 }
@@ -1744,6 +1890,7 @@ function resetTournament() {
   if (!confirm('Reiniciar o torneio? Todo progresso sera perdido.')) return;
   clearGroupDrawTimers();
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem('chimpas_v4');
   S = createInitialState();
   showScreen('splash');
 }

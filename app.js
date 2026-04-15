@@ -1672,9 +1672,10 @@ function syncKnockoutSeeds(groupA) {
 
   S.knockout.seeds = { A: order.slice(0, 6) };
 
-  // 3rd vs 6th → PI1, 4th vs 5th → PI2
-  setMatchPlayers('PI1', order[2], order[5]);
-  setMatchPlayers('PI2', order[3], order[4]);
+  // PI1: 4th vs 5th → feeds SF1 (1st place)
+  // PI2: 3rd vs 6th → feeds SF2 (2nd place)
+  setMatchPlayers('PI1', order[3], order[4]);
+  setMatchPlayers('PI2', order[2], order[5]);
 
   // 1st → SF1 playerA, 2nd → SF2 playerA (keep playerB from progression)
   const sf1 = S.matches.SF1;
@@ -1690,8 +1691,8 @@ function syncKnockoutSeeds(groupA) {
 }
 
 function syncKnockoutProgress() {
-  assignWinnerTo('PI1', 'SF2', 'B');
-  assignWinnerTo('PI2', 'SF1', 'B');
+  assignWinnerTo('PI1', 'SF1', 'B'); // PI1(4vs5) winner → SF1 (plays 1st)
+  assignWinnerTo('PI2', 'SF2', 'B'); // PI2(3vs6) winner → SF2 (plays 2nd)
   assignWinnerTo('SF1', 'F1', 'A');
   assignWinnerTo('SF2', 'F1', 'B');
 }

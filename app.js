@@ -173,6 +173,7 @@ function migrateV4toV5(old) {
       playerA: null,
       playerB: null,
       score: { a: null, b: null },
+      score2: { a: null, b: null },
       winner: null,
       decidedByPenalties: false
     };
@@ -849,6 +850,7 @@ function createMatch({ id, label, phase, kind, mode, round = null, groupId = nul
     playerA,
     playerB,
     score: { a: null, b: null },
+    score2: phase === 'knockout' ? { a: null, b: null } : null,
     winner: null,
     decidedByPenalties: false
   };
@@ -1212,6 +1214,9 @@ function buildMatchCard(matchId) {
   const scored = isMatchScored(m);
   const complete = isMatchComplete(m);
   const ready = m.playerA !== null && m.playerB !== null;
+  const twoLegs = isTwoLegged(m);
+  const leg1Done = isLeg1Scored(m);
+  const leg2Done = isLeg2Scored(m);
 
   card.className = `match-card ${complete ? 'match-done' : ready ? 'match-ready' : 'match-pending-players'}`;
 
@@ -1225,8 +1230,16 @@ function buildMatchCard(matchId) {
 
   const unresolvedPenalty = m.mode === 'elimination' && scored && m.winner === null;
 
+  // For two-legged: show aggregate score; for single: show match score
+  const getScore = (side) => {
+    if (!twoLegs) return leg1Done ? (side === 'A' ? m.score.a : m.score.b) : '-';
+    if (!leg1Done && !leg2Done) return '-';
+    const l1 = side === 'A' ? (m.score.a ?? 0) : (m.score.b ?? 0);
+    const l2 = side === 'A' ? (m.score2?.a ?? 0) : (m.score2?.b ?? 0);
+    return leg1Done && leg2Done ? (l1 + l2) : (side === 'A' ? `${m.score.a ?? '-'}` : `${m.score.b ?? '-'}`);
+  };
+
   const playerRow = (pIdx, side) => {
-    const scoreValue = scored ? (side === 'A' ? m.score.a : m.score.b) : '-';
     if (pIdx === null) {
       return `<div class="match-player tbd">
         <div class="match-logo-placeholder">?</div>
@@ -1244,20 +1257,30 @@ function buildMatchCard(matchId) {
         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
       <div class="match-logo-placeholder" style="display:none">${team.initials}</div>
       <span class="match-player-name">${playerName(pIdx)}</span>
-      <span class="match-player-score">${scoreValue}</span>
+      <span class="match-player-score">${getScore(side)}</span>
     </div>`;
   };
 
+  // Sub-scores line for two-legged (shows Ida / Volta individually)
+  const subScoresHtml = twoLegs && (leg1Done || leg2Done) ? `
+    <div class="match-legs">
+      <span class="match-leg-item">Ida: ${leg1Done ? `${m.score.a}–${m.score.b}` : '–'}</span>
+      <span class="match-leg-sep">|</span>
+      <span class="match-leg-item">Volta: ${leg2Done ? `${m.score2.a}–${m.score2.b}` : '–'}</span>
+    </div>` : '';
+
   const actionLabel = unresolvedPenalty
     ? 'Definir penalti'
-    : (scored ? 'Editar placar' : 'Inserir placar');
+    : (twoLegs
+        ? (leg2Done ? 'Editar placares' : leg1Done ? 'Inserir volta' : 'Inserir placares')
+        : (scored ? 'Editar placar' : 'Inserir placar'));
 
   const winnerLabel = m.mode === 'elimination' && complete
     ? `<div class="match-winner-label">${playerName(m.winner)}${m.decidedByPenalties ? ' (pen.)' : ''}</div>`
     : '';
 
   const warningLabel = unresolvedPenalty
-    ? '<div class="match-warning">Empate - selecione vencedor nos penaltis</div>'
+    ? '<div class="match-warning">Empate no agregado - selecione vencedor nos penaltis</div>'
     : '';
 
   card.innerHTML = `
@@ -1270,6 +1293,7 @@ function buildMatchCard(matchId) {
       <span class="match-vs">VS</span>
     </div>
     ${playerRow(m.playerB, 'B')}
+    ${subScoresHtml}
     ${ready ? `<button class="match-btn" onclick="openModal('${matchId}')">${actionLabel}</button>` : ''}
     ${warningLabel}
     ${winnerLabel}
@@ -1728,6 +1752,7 @@ function setMatchPlayers(matchId, playerA, playerB) {
 
 function resetMatchResult(match) {
   match.score = { a: null, b: null };
+  if (match.score2 !== null && match.score2 !== undefined) match.score2 = { a: null, b: null };
   match.winner = null;
   match.decidedByPenalties = false;
 }
@@ -1744,9 +1769,40 @@ function openModal(matchId) {
   const tA = teamOf(m.playerA);
   const tB = teamOf(m.playerB);
 
-  const titleHint = m.mode === 'elimination'
-    ? 'Empate no placar vai para penaltis.'
+  const twoLegs = isTwoLegged(m);
+  const titleHint = twoLegs
+    ? 'Ida e volta — vencedor pelo agregado. Empate no agregado vai para penaltis.'
     : 'Vitoria 3 pts, empate 1 pt, derrota 0 pt.';
+
+  const scoresHtml = twoLegs ? `
+    <div class="modal-scores">
+      <div class="modal-leg">
+        <div class="modal-leg-title">IDA</div>
+        <div class="modal-score-row">
+          <input type="number" min="0" max="20" class="score-input" id="score-a" value="${m.score.a !== null ? m.score.a : ''}">
+          <span class="score-dash">x</span>
+          <input type="number" min="0" max="20" class="score-input" id="score-b" value="${m.score.b !== null ? m.score.b : ''}">
+        </div>
+      </div>
+      <div class="modal-leg">
+        <div class="modal-leg-title">VOLTA</div>
+        <div class="modal-score-row">
+          <input type="number" min="0" max="20" class="score-input" id="score-a2" value="${m.score2 && m.score2.a !== null ? m.score2.a : ''}">
+          <span class="score-dash">x</span>
+          <input type="number" min="0" max="20" class="score-input" id="score-b2" value="${m.score2 && m.score2.b !== null ? m.score2.b : ''}">
+        </div>
+      </div>
+    </div>` : `
+    <div class="modal-scores">
+      <div class="modal-leg" style="flex:unset;width:100%">
+        <div class="modal-leg-title">PLACAR</div>
+        <div class="modal-score-row">
+          <input type="number" min="0" max="20" class="score-input" id="score-a" value="${m.score.a !== null ? m.score.a : ''}">
+          <span class="score-dash">x</span>
+          <input type="number" min="0" max="20" class="score-input" id="score-b" value="${m.score.b !== null ? m.score.b : ''}">
+        </div>
+      </div>
+    </div>`;
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-header">
@@ -1768,21 +1824,12 @@ function openModal(matchId) {
       </div>
     </div>
 
-    <div class="modal-scores">
-      <div class="modal-leg" style="flex:unset;width:100%">
-        <div class="modal-leg-title">PLACAR</div>
-        <div class="modal-score-row">
-          <input type="number" min="0" max="20" class="score-input" id="score-a" value="${m.score.a !== null ? m.score.a : ''}">
-          <span class="score-dash">x</span>
-          <input type="number" min="0" max="20" class="score-input" id="score-b" value="${m.score.b !== null ? m.score.b : ''}">
-        </div>
-      </div>
-    </div>
+    ${scoresHtml}
 
     <div class="modal-aggregate" id="modal-summary">${buildModalSummary(m)}</div>
 
     <div id="modal-tie" class="modal-tiebreak" style="display:none">
-      <p>Empate no placar. Escolha quem venceu nos penaltis.</p>
+      <p>Empate no agregado. Escolha quem venceu nos penaltis.</p>
       <div class="tiebreak-btns">
         <button class="btn-tiebreak" onclick="savePenaltyWinner('${matchId}', ${m.playerA})">${pA}</button>
         <button class="btn-tiebreak" onclick="savePenaltyWinner('${matchId}', ${m.playerB})">${pB}</button>
@@ -1793,12 +1840,14 @@ function openModal(matchId) {
     <button class="btn-primary btn-save-score" onclick="saveScores('${matchId}')">Salvar placar</button>
   `;
 
-  ['score-a', 'score-b'].forEach(id => {
+  const inputIds = twoLegs ? ['score-a', 'score-b', 'score-a2', 'score-b2'] : ['score-a', 'score-b'];
+  inputIds.forEach(id => {
     const el = document.getElementById(id);
+    if (!el) return;
     el.addEventListener('input', () => {
       document.getElementById('modal-summary').innerHTML = buildModalSummary(m, {
-        a: readScore('score-a'),
-        b: readScore('score-b')
+        leg1: { a: readScore('score-a'), b: readScore('score-b') },
+        leg2: twoLegs ? { a: readScore('score-a2'), b: readScore('score-b2') } : null
       });
       document.getElementById('modal-tie').style.display = 'none';
     });
@@ -1808,24 +1857,31 @@ function openModal(matchId) {
 }
 
 function buildModalSummary(match, preview = null) {
-  const a = preview ? preview.a : match.score.a;
-  const b = preview ? preview.b : match.score.b;
-
-  if (a === null || b === null) {
-    return '<p class="agg-placeholder">Insira o placar para salvar.</p>';
-  }
-
   if (match.mode === 'league') {
+    const a = preview ? preview.leg1.a : match.score.a;
+    const b = preview ? preview.leg1.b : match.score.b;
+    if (a === null || b === null) return '<p class="agg-placeholder">Insira o placar para salvar.</p>';
     if (a > b) return `<p class="agg-label">Resultado</p><p class="agg-tie">${playerName(match.playerA)} venceu.</p>`;
     if (b > a) return `<p class="agg-label">Resultado</p><p class="agg-tie">${playerName(match.playerB)} venceu.</p>`;
     return '<p class="agg-label">Resultado</p><p class="agg-tie">Empate.</p>';
   }
 
-  if (a === b) {
-    return '<p class="agg-label">Resultado</p><p class="agg-tie">Empate: definir vencedor nos penaltis.</p>';
-  }
+  // Two-legged knockout
+  const l1a = preview ? preview.leg1.a : match.score.a;
+  const l1b = preview ? preview.leg1.b : match.score.b;
+  const l2a = preview ? (preview.leg2 ? preview.leg2.a : null) : (match.score2 ? match.score2.a : null);
+  const l2b = preview ? (preview.leg2 ? preview.leg2.b : null) : (match.score2 ? match.score2.b : null);
 
-  return `<p class="agg-label">Resultado</p><p class="agg-tie">${a > b ? playerName(match.playerA) : playerName(match.playerB)} avanca.</p>`;
+  if (l1a === null || l1b === null) return '<p class="agg-placeholder">Insira o placar da ida.</p>';
+  if (l2a === null || l2b === null) return `<p class="agg-placeholder">Ida: ${l1a}–${l1b}. Insira o placar da volta.</p>`;
+
+  const aggA = l1a + l2a;
+  const aggB = l1b + l2b;
+  const aggStr = `Agregado: ${aggA}–${aggB}`;
+
+  if (aggA > aggB) return `<p class="agg-label">${aggStr}</p><p class="agg-tie">${playerName(match.playerA)} avanca.</p>`;
+  if (aggB > aggA) return `<p class="agg-label">${aggStr}</p><p class="agg-tie">${playerName(match.playerB)} avanca.</p>`;
+  return `<p class="agg-label">${aggStr}</p><p class="agg-tie">Empate no agregado — definir nos penaltis.</p>`;
 }
 
 function readScore(id) {
@@ -1850,23 +1906,39 @@ function saveScores(matchId) {
     return;
   }
 
+  // Two-legged knockout
+  if (isTwoLegged(m)) {
+    const a2 = readScore('score-a2');
+    const b2 = readScore('score-b2');
+    m.score2 = { a: a2, b: b2 };
+
+    if (a === null || b === null || a2 === null || b2 === null) {
+      m.winner = null;
+      postScoreUpdate(matchId);
+      return;
+    }
+
+    const aggA = a + a2;
+    const aggB = b + b2;
+
+    if (aggA > aggB) { m.winner = m.playerA; postScoreUpdate(matchId); return; }
+    if (aggB > aggA) { m.winner = m.playerB; postScoreUpdate(matchId); return; }
+
+    m.winner = null;
+    save();
+    document.getElementById('modal-tie').style.display = 'block';
+    return;
+  }
+
+  // Single-leg elimination (tiebreaker duels)
   if (a === null || b === null) {
     m.winner = null;
     postScoreUpdate(matchId);
     return;
   }
 
-  if (a > b) {
-    m.winner = m.playerA;
-    postScoreUpdate(matchId);
-    return;
-  }
-
-  if (b > a) {
-    m.winner = m.playerB;
-    postScoreUpdate(matchId);
-    return;
-  }
+  if (a > b) { m.winner = m.playerA; postScoreUpdate(matchId); return; }
+  if (b > a) { m.winner = m.playerB; postScoreUpdate(matchId); return; }
 
   m.winner = null;
   save();
@@ -1917,8 +1989,22 @@ function closeModalOutside(e) {
   if (e.target === document.getElementById('match-modal')) closeModal();
 }
 
-function isMatchScored(match) {
+function isLeg1Scored(match) {
   return match && match.score.a !== null && match.score.b !== null;
+}
+
+function isLeg2Scored(match) {
+  return match && match.score2 && match.score2.a !== null && match.score2.b !== null;
+}
+
+function isTwoLegged(match) {
+  return match && match.phase === 'knockout';
+}
+
+function isMatchScored(match) {
+  if (!match) return false;
+  if (isTwoLegged(match)) return isLeg1Scored(match) && isLeg2Scored(match);
+  return match.score.a !== null && match.score.b !== null;
 }
 
 function isMatchComplete(match) {
